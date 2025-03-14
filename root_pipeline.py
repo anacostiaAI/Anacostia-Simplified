@@ -83,32 +83,27 @@ class RootPipelineApp(FastAPI):
 
     async def connect(self):
         async with httpx.AsyncClient() as client:
+            # Connect each node to its remote successors
             task = []
             for node in self.pipeline.nodes:
                 for connection in node.remote_successors:
-
                     json = {
                         "node_url": f"http://{self.host}:{self.port}/{node.name}",
                         "node_type": type(node).__name__
                     }
-
                     task.append(client.post(f"{connection}/connect", json=json))
 
             responses = await asyncio.gather(*task)
 
+            # Extract the leaf URLs from the responses, connection is now established
             leaf_urls = []
             for response in responses:
                 if response.status_code == 200:
                     response_json = response.json()
                     leaf_urls.append(response_json["node_url"])
             
-            print(f"Leaf URLs: {leaf_urls}")
+            print(f"Root pipeline connected to these leaf URLs: {leaf_urls}")
             
-            for node in self.pipeline.nodes:
-                for url in leaf_urls:
-                    if url in node.remote_successors:
-                        node.successor_events[url].set()
-
     def run(self):
         original_sigint_handler = signal.getsignal(signal.SIGINT)
 

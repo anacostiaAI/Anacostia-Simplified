@@ -50,7 +50,10 @@ class BaseNode(Thread):
 
         self.successors: List[BaseNode] = list()
         self.remote_successors = list() if remote_successors is None else remote_successors
-        self.successor_events: Dict[str, Event] = {connection: Event() for connection in self.remote_successors}
+        self.successor_events: Dict[str, Event] = {url: Event() for url in self.remote_successors}
+
+        for event in self.successor_events.values():
+            event.set()
 
         # add node to each predecessor's successors list and create an event for each predecessor's successor_events
         for predecessor in self.predecessors:
