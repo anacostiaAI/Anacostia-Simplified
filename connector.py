@@ -6,7 +6,6 @@ from node import BaseNode
 class LeafConnectorNode(BaseNode):
     def __init__(self, name: str):
         super().__init__(name=name)
-        self.remote_predecessors = list()
     
     async def run_async(self):
         print(f'{self.name} waiting for root predecessors to connect')

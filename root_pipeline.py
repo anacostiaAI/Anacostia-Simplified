@@ -74,10 +74,10 @@ class RootPipelineApp(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         for node in self.pipeline.nodes:
-            subapp: Connector = node.initialize_app_connector()
+            subapp: Connector = node.setup_connector()
             subapp.set_host(self.host)
             subapp.set_port(self.port)
-            self.mount(subapp.get_node_prefix(), subapp)          # mount the BaseNodeApp to PipelineWebserver
+            self.mount(subapp.get_connector_prefix(), subapp)          # mount the BaseNodeApp to PipelineWebserver
         
         asyncio.run(self.connect())
 

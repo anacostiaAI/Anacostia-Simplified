@@ -74,10 +74,10 @@ class LeafPipelineApp(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         for node in self.pipeline.nodes:
-            subapp = node.initialize_app_connector()
+            subapp = node.setup_connector()
             subapp.set_host(self.host)
             subapp.set_port(self.port)
-            self.mount(subapp.get_node_prefix(), subapp)         # mount the BaseNodeApp to LeafPipelineApp at the node's prefix
+            self.mount(subapp.get_connector_prefix(), subapp)         # mount the BaseNodeApp to LeafPipelineApp at the node's prefix
         
     def run(self):
         original_sigint_handler = signal.getsignal(signal.SIGINT)

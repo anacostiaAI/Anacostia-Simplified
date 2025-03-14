@@ -37,14 +37,8 @@ class Connector(FastAPI):
     def set_port(self, port: int):
         self.port = port
 
-    def get_node_prefix(self):
+    def get_connector_prefix(self):
         return f"/{self.node.name}"
-    
-    def get_endpoint(self):
-        return f"{self.get_node_prefix()}/home"
-    
-    def get_status_endpoint(self):
-        return f"{self.get_node_prefix()}/status"
     
 
 
@@ -73,7 +67,7 @@ class BaseNode(Thread):
         self.remote_predecessors.append(url)
         self.predecessors_events[url] = Event()
     
-    def initialize_app_connector(self):
+    def setup_connector(self):
         self.app = Connector(self)
         return self.app
     
