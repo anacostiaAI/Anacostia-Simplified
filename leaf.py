@@ -1,9 +1,9 @@
 from leaf_pipeline import LeafPipeline, LeafPipelineApp
 from node import BaseNode
-from connector import BaseConnectorNode
+from connector import LeafConnectorNode
 
 
-connector1 = BaseConnectorNode(name='connector1')
+connector1 = LeafConnectorNode(name='connector1')
 node5 = BaseNode(name='node5', predecessors=[connector1])
 node6 = BaseNode(name='node6', predecessors=[connector1])
 

@@ -1,19 +1,18 @@
 import signal
 import threading
-import sys
+from typing import List, Iterable, Union
 
 from fastapi import FastAPI
 import uvicorn
 
-from typing import List, Iterable, Union
 from node import BaseNode
-from connector import BaseConnectorNode
+from connector import LeafConnectorNode
 import networkx as nx
 
 
 
 class LeafPipeline:
-    def __init__(self, nodes: Iterable[ Union[BaseNode, BaseConnectorNode] ]) -> None:
+    def __init__(self, nodes: Iterable[ Union[BaseNode, LeafConnectorNode] ]) -> None:
 
         self.node_dict = dict()
         self.graph = nx.DiGraph()
@@ -75,7 +74,7 @@ class LeafPipelineApp(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         for node in self.pipeline.nodes:
-            subapp = node.get_app()
+            subapp = node.initialize_app_connector()
             subapp.set_host(self.host)
             subapp.set_port(self.port)
             self.mount(subapp.get_node_prefix(), subapp)         # mount the BaseNodeApp to LeafPipelineApp at the node's prefix

@@ -2,7 +2,7 @@ import signal
 import threading
 
 from typing import List, Iterable
-from node import BaseNode, BaseApp
+from node import BaseNode, Connector
 import networkx as nx
 from fastapi import FastAPI
 import uvicorn
@@ -74,7 +74,7 @@ class RootPipelineApp(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         for node in self.pipeline.nodes:
-            subapp: BaseApp = node.get_app()
+            subapp: Connector = node.initialize_app_connector()
             subapp.set_host(self.host)
             subapp.set_port(self.port)
             self.mount(subapp.get_node_prefix(), subapp)          # mount the BaseNodeApp to PipelineWebserver

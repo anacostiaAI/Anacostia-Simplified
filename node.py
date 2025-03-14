@@ -9,12 +9,22 @@ from utils import ConnectionModel
 
 
 
-class BaseApp(FastAPI):
+class Connector(FastAPI):
     def __init__(self, node: 'BaseNode', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.node = node
         self.host = None
         self.port = None
+
+        @self.post("/connect", status_code=status.HTTP_200_OK)
+        async def connect(root: ConnectionModel) -> ConnectionModel:
+            self.node.add_remote_predecessor(root.node_url)
+            return ConnectionModel(node_url=f"http://{self.host}:{self.port}/{self.node.name}", node_type=type(self.node).__name__)
+        
+        @self.post("/forward_signal", status_code=status.HTTP_200_OK)
+        async def forward_signal(root: ConnectionModel):
+            self.node.predecessors_events[root.node_url].set()
+            return {"message": "Signalled predecessors"}
 
         @self.post("/backward_signal", status_code=status.HTTP_200_OK)
         async def backward_signal(leaf: ConnectionModel):
@@ -41,6 +51,7 @@ class BaseApp(FastAPI):
 class BaseNode(Thread):
     def __init__(self, name: str, predecessors: List['BaseNode'] = None, remote_successors: List[str] = None):
         self.predecessors = list() if predecessors is None else predecessors
+        self.remote_predecessors = list()
         self.predecessors_events: Dict[str, Event] = {predecessor.name: Event() for predecessor in self.predecessors}
 
         self.successors: List[BaseNode] = list()
@@ -58,8 +69,12 @@ class BaseNode(Thread):
 
         super().__init__(name=name)
 
-    def get_app(self):
-        self.app = BaseApp(self)
+    def add_remote_predecessor(self, url: str):
+        self.remote_predecessors.append(url)
+        self.predecessors_events[url] = Event()
+    
+    def initialize_app_connector(self):
+        self.app = Connector(self)
         return self.app
     
     async def signal_successors(self):
@@ -88,10 +103,25 @@ class BaseNode(Thread):
         for event in self.successor_events.values():
             event.clear()
     
-    def signal_predecessors(self):
+    async def signal_predecessors(self):
         for predecessor in self.predecessors:
             predecessor.successor_events[self.name].set()
 
+        try:
+            async with httpx.AsyncClient() as client:
+                tasks = []
+                for predecessor_url in self.remote_predecessors:
+                    json = {
+                        "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
+                        "node_type": type(self).__name__
+                    }
+                    tasks.append(client.post(f"{predecessor_url}/backward_signal", json=json))
+
+                await asyncio.gather(*tasks)
+        except httpx.ConnectError:
+            print(f"Failed to signal predecessors from {self.name}")
+            self.exit()
+            
     def wait_for_predecessors(self):
         for event in self.predecessors_events.values():
             event.wait()
@@ -131,7 +161,7 @@ class BaseNode(Thread):
 
             if self.exit_event.is_set(): return
             print(f'{self.name} signalling predecessors')
-            self.signal_predecessors()
+            await self.signal_predecessors()
     
     def run(self) -> None:
         asyncio.run(self.run_async())
