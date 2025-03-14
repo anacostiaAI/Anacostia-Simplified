@@ -72,23 +72,26 @@ class BaseNode(Thread):
         return self.app
     
     async def signal_successors(self):
-        for successor in self.successors:
-            successor.predecessors_events[self.name].set()
+        if len(self.successors) > 0:
+            for successor in self.successors:
+                successor.predecessors_events[self.name].set()
         
-        try:
-            async with httpx.AsyncClient() as client:
-                tasks = []
-                for successor_url in self.remote_successors:
-                    json = {
-                        "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
-                        "node_type": type(self).__name__
-                    }
-                    tasks.append(client.post(f"{successor_url}/forward_signal", json=json))
-                
-                await asyncio.gather(*tasks)
-        except httpx.ConnectError:
-            print(f"Failed to signal successors from {self.name}")
-            self.exit()
+        if len(self.remote_successors) > 0:
+            try:
+                async with httpx.AsyncClient() as client:
+                    tasks = []
+                    for successor_url in self.remote_successors:
+                        json = {
+                            "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
+                            "node_type": type(self).__name__
+                        }
+                        tasks.append(client.post(f"{successor_url}/forward_signal", json=json))
+                    
+                    await asyncio.gather(*tasks)
+                    print(f"Done signalling remote successors from {self.name}")
+            except httpx.ConnectError:
+                print(f"Failed to signal successors from {self.name}")
+                self.exit()
 
     def wait_for_successors(self):
         for event in self.successor_events.values():
@@ -98,23 +101,26 @@ class BaseNode(Thread):
             event.clear()
     
     async def signal_predecessors(self):
-        for predecessor in self.predecessors:
-            predecessor.successor_events[self.name].set()
+        if len(self.predecessors) > 0: 
+            for predecessor in self.predecessors:
+                predecessor.successor_events[self.name].set()
 
-        try:
-            async with httpx.AsyncClient() as client:
-                tasks = []
-                for predecessor_url in self.remote_predecessors:
-                    json = {
-                        "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
-                        "node_type": type(self).__name__
-                    }
-                    tasks.append(client.post(f"{predecessor_url}/backward_signal", json=json))
+        if len(self.remote_predecessors) > 0:
+            try:
+                async with httpx.AsyncClient() as client:
+                    tasks = []
+                    for predecessor_url in self.remote_predecessors:
+                        json = {
+                            "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
+                            "node_type": type(self).__name__
+                        }
+                        tasks.append(client.post(f"{predecessor_url}/backward_signal", json=json))
 
-                await asyncio.gather(*tasks)
-        except httpx.ConnectError:
-            print(f"Failed to signal predecessors from {self.name}")
-            self.exit()
+                    await asyncio.gather(*tasks)
+                    print(f"Done signalling remote predecessors from {self.name}")
+            except httpx.ConnectError:
+                print(f"Failed to signal predecessors from {self.name}")
+                self.exit()
             
     def wait_for_predecessors(self):
         for event in self.predecessors_events.values():
@@ -142,12 +148,13 @@ class BaseNode(Thread):
             self.wait_for_predecessors()
 
             if self.exit_event.is_set(): return
-            print(f'{self.name} signalling successors')
-            await self.signal_successors()
-
             print(f'{self.name} is running')
             await asyncio.sleep(random.randint(1, 3))
             print(f'{self.name} is done')
+
+            if self.exit_event.is_set(): return
+            print(f'{self.name} signalling successors')
+            await self.signal_successors()
 
             if self.exit_event.is_set(): return
             print(f'{self.name} waiting for successors')
