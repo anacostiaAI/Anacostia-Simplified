@@ -43,9 +43,9 @@ class Connector(FastAPI):
 
 
 class BaseNode(Thread):
-    def __init__(self, name: str, predecessors: List['BaseNode'] = None, remote_successors: List[str] = None):
+    def __init__(self, name: str, predecessors: List['BaseNode'] = None, remote_predecessors: List[str] = None, remote_successors: List[str] = None):
         self.predecessors = list() if predecessors is None else predecessors
-        self.remote_predecessors = list()
+        self.remote_predecessors = list() if remote_predecessors is None else remote_predecessors
         self.predecessors_events: Dict[str, Event] = {predecessor.name: Event() for predecessor in self.predecessors}
 
         self.successors: List[BaseNode] = list()
@@ -67,8 +67,9 @@ class BaseNode(Thread):
         super().__init__(name=name)
 
     def add_remote_predecessor(self, url: str):
-        self.remote_predecessors.append(url)
-        self.predecessors_events[url] = Event()
+        if url not in self.remote_predecessors:
+            self.remote_predecessors.append(url)
+            self.predecessors_events[url] = Event()
     
     def setup_connector(self):
         self.app = Connector(self)
