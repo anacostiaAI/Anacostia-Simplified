@@ -40,8 +40,8 @@ class PipelineServer(FastAPI):
         # get the successor ip addresses
         self.successor_ip_addresses = []
         for node in self.pipeline.nodes:
-            for url in node.remote_successors:
-                parsed = urlparse(url)
+            for conn in node.remote_successors:
+                parsed = urlparse(conn['node_url'])
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
                 if base_url not in self.successor_ip_addresses:
@@ -75,7 +75,7 @@ class PipelineServer(FastAPI):
                         "node_url": f"http://{self.host}:{self.port}/{node.name}",
                         "node_type": type(node).__name__
                     }
-                    task.append(client.post(f"{connection}/connect", json=json))
+                    task.append(client.post(f"{connection['node_url']}/connect", json=json))
 
             responses = await asyncio.gather(*task)
 

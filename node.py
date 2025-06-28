@@ -15,11 +15,44 @@ class ConnectionModel(BaseModel):
 
 
 class Connector(FastAPI):
-    def __init__(self, node: 'BaseNode', *args, **kwargs):
+    def __init__(
+        self, node: 'BaseNode', 
+        host: str, port: int, 
+        remote_predecessors: List[Dict[str, str]] = None, 
+        remote_successors: List[Dict[str, str]] = None, 
+        *args, **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.node = node
-        self.host = None
-        self.port = None
+        self.host = host
+        self.port = port
+
+        self.remote_predecessors: List[Dict[str, str]] = remote_predecessors if remote_predecessors is not None else []
+        self.remote_successors: List[Dict[str, str]] = remote_successors if remote_successors is not None else []
+
+        if self.remote_predecessors is None:
+            self.remote_predecessors = []
+
+        self.remote_predecessors_clients = {
+            conn['node_url']: httpx.AsyncClient(
+                base_url=conn["node_url"], 
+                #verify=conn['ssl_ca_certs'], 
+                #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+            ) 
+            for conn in self.remote_predecessors
+        }
+
+        if self.remote_successors is None:
+            self.remote_successors = []
+
+        self.remote_successors_clients = {
+            conn['node_url']: httpx.AsyncClient(
+                base_url=conn["node_url"], 
+                #verify=conn['ssl_ca_certs'], 
+                #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+            ) 
+            for conn in self.remote_successors
+        }
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
@@ -51,8 +84,8 @@ class BaseNode(Thread):
     def __init__(
         self, name: str, 
         predecessors: List['BaseNode'] = None, 
-        remote_predecessors: List[str] = None, 
-        remote_successors: List[str] = None,
+        remote_predecessors: List[Dict[str, str]] = None, 
+        remote_successors: List[Dict[str, str]] = None,
         wait_for_connection: bool = False
     ):
         self.wait_for_connection = wait_for_connection
@@ -63,7 +96,7 @@ class BaseNode(Thread):
 
         self.successors: List[BaseNode] = list()
         self.remote_successors = list() if remote_successors is None else remote_successors
-        self.successor_events: Dict[str, Event] = {url: Event() for url in self.remote_successors}
+        self.successor_events: Dict[str, Event] = {conn['node_url']: Event() for conn in self.remote_successors}
 
         for event in self.successor_events.values():
             event.set()
@@ -98,12 +131,12 @@ class BaseNode(Thread):
             try:
                 async with httpx.AsyncClient() as client:
                     tasks = []
-                    for successor_url in self.remote_successors:
+                    for conn in self.remote_successors:
                         json = {
                             "node_url": f"http://{self.connector.host}:{self.connector.port}/{self.name}",
                             "node_type": type(self).__name__
                         }
-                        tasks.append(client.post(f"{successor_url}/forward_signal", json=json))
+                        tasks.append(client.post(f"{conn['node_url']}/forward_signal", json=json))
                     
                     await asyncio.gather(*tasks)
                     print(f"Done signalling remote successors from {self.name}")

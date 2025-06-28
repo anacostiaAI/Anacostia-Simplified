@@ -6,7 +6,7 @@ from server import PipelineServer
 
 node1 = BaseNode(name='node1')
 node2 = BaseNode(name='node2')
-node3 = BaseNode(name='node3', predecessors=[node1, node2], remote_successors=["http://127.0.0.1:8001/connector1"])
+node3 = BaseNode(name='node3', predecessors=[node1, node2], remote_successors=[{"node_url": "http://127.0.0.1:8001/connector1"}])
 
 pipeline = Pipeline([node1, node2, node3])
 service = PipelineServer(name="leaf", pipeline=pipeline, host="127.0.0.1", port=8000)
