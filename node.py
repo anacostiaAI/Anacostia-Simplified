@@ -3,10 +3,15 @@ from threading import Event, Thread
 import random
 import asyncio
 import httpx
+from pydantic import BaseModel
 
 from fastapi import FastAPI, status
-from utils import ConnectionModel
 
+
+
+class ConnectionModel(BaseModel):
+    node_url: str
+    node_type: str
 
 
 class Connector(FastAPI):
