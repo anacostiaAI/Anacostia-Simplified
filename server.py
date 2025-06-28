@@ -3,6 +3,7 @@ import signal
 import asyncio
 from pydantic import BaseModel
 from urllib.parse import urlparse
+from typing import List, Dict
 
 from fastapi import FastAPI, status
 import uvicorn
@@ -47,11 +48,11 @@ class PipelineServer(FastAPI):
                 if base_url not in self.successor_ip_addresses:
                     self.successor_ip_addresses.append(base_url)
 
+        self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:
-            subapp: Connector = node.setup_connector()
-            subapp.set_host(self.host)
-            subapp.set_port(self.port)
-            self.mount(subapp.get_connector_prefix(), subapp)          # mount the BaseNodeApp to PipelineWebserver
+            connector: Connector = node.setup_connector(host=self.host, port=self.port)
+            self.mount(connector.get_connector_prefix(), connector)          # mount the BaseNodeApp to PipelineWebserver
+            self.connectors.append(connector)
         
         self.predecessor_host = None
         self.predecessor_port = None
@@ -66,35 +67,33 @@ class PipelineServer(FastAPI):
                 node.connection_event.set()  # Set the connection event for each node
 
     async def connect(self):
-        async with httpx.AsyncClient() as client:
-            # Connect each node to its remote successors
-            task = []
-            for node in self.pipeline.nodes:
-                for connection in node.remote_successors:
-                    json = {
-                        "node_url": f"http://{self.host}:{self.port}/{node.name}",
-                        "node_type": type(node).__name__
-                    }
-                    task.append(client.post(f"{connection['node_url']}/connect", json=json))
+        # Connect each node to its remote successors
+        task = []
+        for connector in self.connectors:
+            task.extend(await connector.connect())
+        responses = await asyncio.gather(*task)
 
-            responses = await asyncio.gather(*task)
-
-            # Extract the leaf URLs from the responses, connection is now established
-            leaf_urls = []
-            for response in responses:
-                if response.status_code == 200:
-                    response_json = response.json()
-                    leaf_urls.append(response_json["node_url"])
+        # Extract the leaf URLs from the responses, connection is now established
+        leaf_urls = []
+        for response in responses:
+            if response.status_code == 200:
+                response_json = response.json()
+                leaf_urls.append(response_json["node_url"])
+            else:
+                print(f"Failed to connect to remote successor: {response.status_code} - {response.text}")
             
+        async with httpx.AsyncClient() as client:
             task = []
             for leaf_ip_address in self.successor_ip_addresses:
                 task.append(client.post(f"{leaf_ip_address}/finish_connect"))
-
             await asyncio.gather(*task)
-            print(f"Root pipeline connected to these leaf URLs: {leaf_urls}")
-            
+
+        print(f"Root pipeline connected to these leaf URLs: {leaf_urls}")
+
     async def disconnect(self):
-        print("Disconnecting from leaf nodes...")
+        for connector in self.connectors:
+            await connector.close_all_clients()
+        print("All remote clients closed.")
 
     def run(self):
         original_sigint_handler = signal.getsignal(signal.SIGINT)

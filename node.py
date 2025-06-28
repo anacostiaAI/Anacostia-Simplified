@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Coroutine
 from threading import Event, Thread
 import random
 import asyncio
@@ -78,6 +78,31 @@ class Connector(FastAPI):
     def get_connector_prefix(self):
         return f"/{self.node.name}"
     
+    async def close_all_clients(self) -> None:
+        for client in self.remote_predecessors_clients.values():
+            await client.aclose()
+        
+        for client in self.remote_successors_clients.values():
+            await client.aclose()
+    
+    async def connect(self) -> List[Coroutine]:
+        
+        # Connect each node to its remote successors
+        tasks = []
+        for conn in self.node.remote_successors:
+            client = self.remote_successors_clients.get(conn['node_url'])
+
+            if client is None:
+                raise ValueError(f"Remote successor client for {conn['node_url']} not found.")
+
+            json = {
+                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_type": type(self.node).__name__
+            }
+            tasks.append(client.post("/connect", json=json))
+
+        return tasks
+    
 
 
 class BaseNode(Thread):
@@ -119,7 +144,9 @@ class BaseNode(Thread):
             self.predecessors_events[url] = Event()
     
     def setup_connector(self, host: str = None, port: int = None) -> Connector:
-        self.connector = Connector(self, host=host, port=port)
+        self.connector = Connector(
+            node=self, host=host, port=port, remote_predecessors=self.remote_predecessors, remote_successors=self.remote_successors
+        )
         return self.connector
     
     async def signal_successors(self):
