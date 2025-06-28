@@ -43,7 +43,15 @@ class Connector(FastAPI):
 
 
 class BaseNode(Thread):
-    def __init__(self, name: str, predecessors: List['BaseNode'] = None, remote_predecessors: List[str] = None, remote_successors: List[str] = None):
+    def __init__(
+        self, name: str, 
+        predecessors: List['BaseNode'] = None, 
+        remote_predecessors: List[str] = None, 
+        remote_successors: List[str] = None,
+        wait_for_connection: bool = False
+    ):
+        self.wait_for_connection = wait_for_connection
+
         self.predecessors = list() if predecessors is None else predecessors
         self.remote_predecessors = list() if remote_predecessors is None else remote_predecessors
         self.predecessors_events: Dict[str, Event] = {predecessor.name: Event() for predecessor in self.predecessors}
@@ -62,6 +70,7 @@ class BaseNode(Thread):
 
         self.exit_event = Event()
         self.pause_event = Event()
+        self.connection_event = Event()
         self.pause_event.set()
 
         super().__init__(name=name)
@@ -71,9 +80,9 @@ class BaseNode(Thread):
             self.remote_predecessors.append(url)
             self.predecessors_events[url] = Event()
     
-    def setup_connector(self):
-        self.app = Connector(self)
-        return self.app
+    def setup_connector(self, host: str = None, port: int = None) -> Connector:
+        self.connector = Connector(self, host=host, port=port)
+        return self.connector
     
     async def signal_successors(self):
         if len(self.successors) > 0:
@@ -86,7 +95,7 @@ class BaseNode(Thread):
                     tasks = []
                     for successor_url in self.remote_successors:
                         json = {
-                            "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
+                            "node_url": f"http://{self.connector.host}:{self.connector.port}/{self.name}",
                             "node_type": type(self).__name__
                         }
                         tasks.append(client.post(f"{successor_url}/forward_signal", json=json))
@@ -115,7 +124,7 @@ class BaseNode(Thread):
                     tasks = []
                     for predecessor_url in self.remote_predecessors:
                         json = {
-                            "node_url": f"http://{self.app.host}:{self.app.port}/{self.name}",
+                            "node_url": f"http://{self.connector.host}:{self.connector.port}/{self.name}",
                             "node_type": type(self).__name__
                         }
                         tasks.append(client.post(f"{predecessor_url}/backward_signal", json=json))
@@ -144,7 +153,12 @@ class BaseNode(Thread):
         for event in self.predecessors_events.values():
             event.set()
     
-    async def run_async(self):
+    async def node_lifecycle(self):
+        if self.wait_for_connection:
+            print(f'{self.name} waiting for connection')
+            self.connection_event.wait()
+            print(f'{self.name} connection established, proceeding to run')
+
         while self.exit_event.is_set() is False:
 
             if self.exit_event.is_set(): return
@@ -169,4 +183,4 @@ class BaseNode(Thread):
             await self.signal_predecessors()
     
     def run(self) -> None:
-        asyncio.run(self.run_async())
+        asyncio.run(self.node_lifecycle())
