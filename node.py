@@ -57,6 +57,14 @@ class Connector(FastAPI):
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
             self.node.add_remote_predecessor(root.node_url)
+            if root.node_url not in self.remote_predecessors_clients:
+                self.remote_predecessors_clients[root.node_url] = httpx.AsyncClient(
+                    base_url=root.node_url,
+                    # Uncomment the following lines if SSL verification is needed                                                            
+                    # verify=root.ssl_ca_certs, 
+                    # cert=(root.ssl_certfile, root.ssl_keyfile)
+                )
+
             print(f"'{self.node.name}' connected to remote predecessor {root.node_url}")
             return ConnectionModel(node_url=f"http://{self.host}:{self.port}/{self.node.name}", node_type=type(self.node).__name__)
         
@@ -203,22 +211,12 @@ class BaseNode(Thread):
             for predecessor in self.predecessors:
                 predecessor.successor_events[self.name].set()
 
-        if len(self.remote_predecessors) > 0:
-            try:
-                async with httpx.AsyncClient() as client:
-                    tasks = []
-                    for predecessor_url in self.remote_predecessors:
-                        json = {
-                            "node_url": f"http://{self.connector.host}:{self.connector.port}/{self.name}",
-                            "node_type": type(self).__name__
-                        }
-                        tasks.append(client.post(f"{predecessor_url}/backward_signal", json=json))
-
-                    await asyncio.gather(*tasks)
-                    print(f"Done signalling remote predecessors from {self.name}")
-            except httpx.ConnectError:
-                print(f"Failed to signal predecessors from {self.name}")
-                self.exit()
+        try:
+            await self.connector.signal_remote_predecessors()
+            print(f"'{self.name}' finished signalling remote predecessors")
+        except httpx.ConnectError:
+            print(f"'{self.name}' failed to signal predecessors from {self.name}")
+            self.exit()
             
     def wait_for_predecessors(self):
         for event in self.predecessors_events.values():
