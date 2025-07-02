@@ -61,34 +61,40 @@ class PipelineServer(FastAPI):
             self.predecessor_host = connection.predecessor_host
             self.predecessor_port = connection.predecessor_port
         
+        @self.get("/start", status_code=status.HTTP_200_OK)
+        async def start():
+            print(f"Starting {self.name} Pipeline...")
+            for node in self.pipeline.nodes:
+                node.start_node_lifecycle.set()
+
         @self.post("/finish_connect", status_code=status.HTTP_200_OK)
         async def finish_connect():
             for node in self.pipeline.nodes:
-                node.connection_event.set()  # Set the connection event for each node
+                node.start_node_lifecycle.set()  # Set each node's start_node_lifecycle event to allow them to start executing
 
     async def connect(self):
-        # Connect each node to its remote successors
-        task = []
-        for connector in self.connectors:
-            task.extend(await connector.connect())
-        responses = await asyncio.gather(*task)
-
-        # Extract the leaf URLs from the responses, connection is now established
-        leaf_urls = []
-        for response in responses:
-            if response.status_code == 200:
-                response_json = response.json()
-                leaf_urls.append(response_json["node_url"])
-            else:
-                print(f"Failed to connect to remote successor: {response.status_code} - {response.text}")
-            
         async with httpx.AsyncClient() as client:
+            # Connect to leaf pipeline
+            task = []
+            for leaf_ip_address in self.successor_ip_addresses:
+                pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
+                task.append(client.post(f"{leaf_ip_address}/connect", json=pipeline_server_model))
+            await asyncio.gather(*task)
+
+            # Set each node's establish_connection event to allow them to connect to their remote predecessors
+            print("Setting all nodes to establish connection...")
+            for node in self.pipeline.nodes:
+                node.start_establishing_connection.set()
+
+            # Wait for all nodes to finish establishing connection
+            print("Waiting for all nodes to finish establishing connection...")
+            for node in self.pipeline.nodes:
+                node.finished_establishing_connection.wait()
+
             task = []
             for leaf_ip_address in self.successor_ip_addresses:
                 task.append(client.post(f"{leaf_ip_address}/finish_connect"))
             await asyncio.gather(*task)
-
-        print(f"Root pipeline connected to these leaf URLs: {leaf_urls}")
 
     async def disconnect(self):
         for connector in self.connectors:

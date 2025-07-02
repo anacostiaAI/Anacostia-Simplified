@@ -57,11 +57,13 @@ class Connector(FastAPI):
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
             self.node.add_remote_predecessor(root.node_url)
+            print(f"'{self.node.name}' connected to remote predecessor {root.node_url}")
             return ConnectionModel(node_url=f"http://{self.host}:{self.port}/{self.node.name}", node_type=type(self.node).__name__)
         
         @self.post("/forward_signal", status_code=status.HTTP_200_OK)
         async def forward_signal(root: ConnectionModel):
             self.node.predecessors_events[root.node_url].set()
+            print(f"'{self.node.name}' signalled by remote successors {root.node_url}")
             return {"message": "Signalled predecessors"}
 
         @self.post("/backward_signal", status_code=status.HTTP_200_OK)
@@ -69,12 +71,6 @@ class Connector(FastAPI):
             self.node.successor_events[leaf.node_url].set()
             return {"message": "Signalled predecessors"}
     
-    def set_host(self, host: str):
-        self.host = host
-    
-    def set_port(self, port: int):
-        self.port = port
-
     def get_connector_prefix(self):
         return f"/{self.node.name}"
     
@@ -101,7 +97,32 @@ class Connector(FastAPI):
             }
             tasks.append(client.post("/connect", json=json))
 
-        return tasks
+        responses = await asyncio.gather(*tasks)
+        return responses
+    
+    async def signal_remote_successors(self):
+        tasks = []
+        for client in self.remote_successors_clients.values():
+            json = {
+                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_type": type(self.node).__name__
+            }
+            tasks.append(client.post("/forward_signal", json=json))
+
+        responses = await asyncio.gather(*tasks)
+        return responses
+    
+    async def signal_remote_predecessors(self):
+        tasks = []
+        for client in self.remote_predecessors_clients.values():
+            json = {
+                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_type": type(self.node).__name__
+            }
+            tasks.append(client.post("/backward_signal", json=json))
+
+        responses = await asyncio.gather(*tasks)
+        return responses
     
 
 
@@ -133,7 +154,16 @@ class BaseNode(Thread):
 
         self.exit_event = Event()
         self.pause_event = Event()
-        self.connection_event = Event()
+
+        self.start_establishing_connection = Event()
+        self.finished_establishing_connection = Event()
+        self.start_node_lifecycle = Event()
+        
+        if not self.wait_for_connection:
+            self.start_establishing_connection.set()
+            self.finished_establishing_connection.set()
+            self.start_node_lifecycle.set()
+        
         self.pause_event.set()
 
         super().__init__(name=name)
@@ -154,22 +184,12 @@ class BaseNode(Thread):
             for successor in self.successors:
                 successor.predecessors_events[self.name].set()
         
-        if len(self.remote_successors) > 0:
-            try:
-                async with httpx.AsyncClient() as client:
-                    tasks = []
-                    for conn in self.remote_successors:
-                        json = {
-                            "node_url": f"http://{self.connector.host}:{self.connector.port}/{self.name}",
-                            "node_type": type(self).__name__
-                        }
-                        tasks.append(client.post(f"{conn['node_url']}/forward_signal", json=json))
-                    
-                    await asyncio.gather(*tasks)
-                    print(f"Done signalling remote successors from {self.name}")
-            except httpx.ConnectError:
-                print(f"Failed to signal successors from {self.name}")
-                self.exit()
+        try:
+            await self.connector.signal_remote_successors()
+            print(f"'{self.name}' finished signalling remote successors")
+        except httpx.ConnectError:
+            print(f"'{self.name}' failed to signal successors from {self.name}")
+            self.exit()
 
     def wait_for_successors(self):
         for event in self.successor_events.values():
@@ -209,6 +229,9 @@ class BaseNode(Thread):
     
     def exit(self):
         # set all events so loop can continue to next checkpoint and break out of loop
+        self.start_node_lifecycle.set()
+        self.finished_establishing_connection.set()
+        self.start_establishing_connection.set()
         self.pause_event.set()
         self.exit_event.set()
 
@@ -220,8 +243,18 @@ class BaseNode(Thread):
     
     async def node_lifecycle(self):
         if self.wait_for_connection:
-            print(f'{self.name} waiting for connection')
-            self.connection_event.wait()
+            print(f'{self.name} waiting for permission to establish connection')
+            self.start_establishing_connection.wait()
+            print(f'{self.name} permission granted, establishing connection')
+        
+            print(f'{self.name} connecting to remote successors {self.remote_successors}')
+            await self.connector.connect()
+            print(f'{self.name} connected to remote successors {self.remote_successors}')
+            
+            self.finished_establishing_connection.set()
+            print(f'{self.name} finished establishing connection, waiting for signal from PipelineServer to run')
+
+            self.start_node_lifecycle.wait()
             print(f'{self.name} connection established, proceeding to run')
 
         while self.exit_event.is_set() is False:
