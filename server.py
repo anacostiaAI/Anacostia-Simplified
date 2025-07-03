@@ -55,12 +55,12 @@ class PipelineServer(FastAPI):
             self.connectors.append(connector)
         
         self.predecessor_ip_addresses = []
+
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(connection: PipelineConnectionModel):
-            if f"http://{connection.predecessor_host}:{connection.predecessor_port}" not in self.predecessor_ip_addresses:
-                self.predecessor_ip_addresses.append(
-                    f"http://{connection.predecessor_host}:{connection.predecessor_port}"
-                ) 
+            predecessor_url = f"http://{connection.predecessor_host}:{connection.predecessor_port}"
+            if predecessor_url not in self.predecessor_ip_addresses:
+                self.predecessor_ip_addresses.append(predecessor_url) 
 
         @self.post("/finish_connect", status_code=status.HTTP_200_OK)
         async def finish_connect():
