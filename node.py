@@ -33,6 +33,7 @@ class Connector(FastAPI):
         if self.remote_predecessors is None:
             self.remote_predecessors = []
 
+        # Create HTTP clients for each remote_predecessor if user provided remote_predecessors
         self.remote_predecessors_clients = {
             conn['node_url']: httpx.AsyncClient(
                 base_url=conn["node_url"], 
@@ -58,9 +59,9 @@ class Connector(FastAPI):
         async def connect(root: ConnectionModel) -> ConnectionModel:
             self.node.add_remote_predecessor(root.node_url)
             if root.node_url not in self.remote_predecessors_clients:
+                # Create a new HTTP client for the remote predecessor when predecessor connects
                 self.remote_predecessors_clients[root.node_url] = httpx.AsyncClient(
                     base_url=root.node_url,
-                    # Uncomment the following lines if SSL verification is needed                                                            
                     # verify=root.ssl_ca_certs, 
                     # cert=(root.ssl_certfile, root.ssl_keyfile)
                 )
