@@ -3,7 +3,7 @@ import signal
 import asyncio
 from pydantic import BaseModel
 from urllib.parse import urlparse
-from typing import List
+from typing import List, Dict
 
 from fastapi import FastAPI, status
 import uvicorn
@@ -39,14 +39,18 @@ class PipelineServer(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         # get the successor ip addresses
-        self.remote_successor_clients = []
+        self.remote_successor_clients: Dict[str, httpx.AsyncClient] = {}
         for node in self.pipeline.nodes:
             for conn in node.remote_successors:
                 parsed = urlparse(conn['node_url'])
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
                 if base_url not in self.remote_successor_clients:
-                    self.remote_successor_clients.append(base_url)
+                    self.remote_successor_clients[base_url] = httpx.AsyncClient(
+                        base_url=base_url, 
+                        #verify=conn['ssl_ca_certs'], 
+                        #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+                    ) 
 
         self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:
@@ -68,33 +72,32 @@ class PipelineServer(FastAPI):
                 node.start_node_lifecycle.set()  # Set each node's start_node_lifecycle event to allow them to start executing
 
     async def connect(self):
-        async with httpx.AsyncClient() as client:
-            # Connect to leaf pipeline
+        # Connect to leaf pipeline
+        task = []
+        for client in self.remote_successor_clients.values():
+            pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
+            task.append(client.post("/connect", json=pipeline_server_model))
+        await asyncio.gather(*task)
+
+        # Set each node's establish_connection event to allow them to connect to their remote predecessors
+        print("Setting all nodes to establish connection...")
+        for node in self.pipeline.nodes:
+            node.start_establishing_connection.set()
+
+        # Wait for all nodes to finish establishing connection
+        print("Waiting for all nodes to finish establishing connection...")
+        for node in self.pipeline.nodes:
+            node.finished_establishing_connection.wait()
+
+        # Start the nodes on the successor pipeline before allowing the nodes to start executing
+        if len(self.remote_successor_clients) > 0:
             task = []
-            for successor_ip_address in self.remote_successor_clients:
-                pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
-                task.append(client.post(f"{successor_ip_address}/connect", json=pipeline_server_model))
+            for client in self.remote_successor_clients.values():
+                task.append(client.post("/finish_connect"))
             await asyncio.gather(*task)
 
-            # Set each node's establish_connection event to allow them to connect to their remote predecessors
-            print("Setting all nodes to establish connection...")
             for node in self.pipeline.nodes:
-                node.start_establishing_connection.set()
-
-            # Wait for all nodes to finish establishing connection
-            print("Waiting for all nodes to finish establishing connection...")
-            for node in self.pipeline.nodes:
-                node.finished_establishing_connection.wait()
-
-            # Start the nodes on the successor pipeline before allowing the nodes to start executing
-            if len(self.remote_successor_clients) > 0:
-                task = []
-                for successor_ip_address in self.remote_successor_clients:
-                    task.append(client.post(f"{successor_ip_address}/finish_connect"))
-                await asyncio.gather(*task)
-
-                for node in self.pipeline.nodes:
-                    node.start_node_lifecycle.set()
+                node.start_node_lifecycle.set()
 
     async def disconnect(self):
         for connector in self.connectors:
