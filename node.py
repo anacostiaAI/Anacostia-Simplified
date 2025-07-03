@@ -34,7 +34,7 @@ class Connector(FastAPI):
             self.remote_predecessors = []
 
         # Create HTTP clients for each remote_predecessor if user provided remote_predecessors
-        self.remote_predecessors_clients = {}
+        self.remote_predecessors_clients: Dict[str, httpx.AsyncClient] = {}
         for conn in self.remote_predecessors:
             if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
                 # If no SSL certificates are provided, create a client without them
@@ -50,7 +50,7 @@ class Connector(FastAPI):
         if self.remote_successors is None:
             self.remote_successors = []
 
-        self.remote_successors_clients = {}
+        self.remote_successors_clients: Dict[str, httpx.AsyncClient] = {}
         for conn in self.remote_successors:
             if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
                 # If no SSL certificates are provided, create a client without them

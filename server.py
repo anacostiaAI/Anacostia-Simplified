@@ -104,6 +104,9 @@ class PipelineServer(FastAPI):
     async def disconnect(self):
         for connector in self.connectors:
             await connector.close_all_clients()
+        
+        for client in self.remote_successor_clients.values():
+            await client.aclose()
         print("All remote clients closed.")
 
     def run(self):
