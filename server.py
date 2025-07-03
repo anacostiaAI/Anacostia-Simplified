@@ -46,11 +46,13 @@ class PipelineServer(FastAPI):
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
                 if base_url not in self.remote_successor_clients:
-                    self.remote_successor_clients[base_url] = httpx.AsyncClient(
-                        base_url=base_url, 
-                        #verify=conn['ssl_ca_certs'], 
-                        #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-                    ) 
+                    if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
+                        self.remote_successor_clients[base_url] = httpx.AsyncClient(base_url=base_url)
+                    else:
+                        # If SSL certificates are provided, use them to create the client
+                        self.remote_successor_clients[base_url] = httpx.AsyncClient(
+                            base_url=base_url, verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+                        ) 
 
         self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:

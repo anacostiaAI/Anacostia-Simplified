@@ -34,26 +34,34 @@ class Connector(FastAPI):
             self.remote_predecessors = []
 
         # Create HTTP clients for each remote_predecessor if user provided remote_predecessors
-        self.remote_predecessors_clients = {
-            conn['node_url']: httpx.AsyncClient(
-                base_url=conn["node_url"], 
-                #verify=conn['ssl_ca_certs'], 
-                #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-            ) 
-            for conn in self.remote_predecessors
-        }
+        self.remote_predecessors_clients = {}
+        for conn in self.remote_predecessors:
+            if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
+                # If no SSL certificates are provided, create a client without them
+                self.remote_predecessors_clients[conn['node_url']] = httpx.AsyncClient(
+                    base_url=conn["node_url"]
+                )
+            else:
+                # If SSL certificates are provided, use them to create the client
+                self.remote_predecessors_clients[conn['node_url']] = httpx.AsyncClient(
+                    base_url=conn["node_url"], verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+                ) 
 
         if self.remote_successors is None:
             self.remote_successors = []
 
-        self.remote_successors_clients = {
-            conn['node_url']: httpx.AsyncClient(
-                base_url=conn["node_url"], 
-                #verify=conn['ssl_ca_certs'], 
-                #cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-            ) 
-            for conn in self.remote_successors
-        }
+        self.remote_successors_clients = {}
+        for conn in self.remote_successors:
+            if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
+                # If no SSL certificates are provided, create a client without them
+                self.remote_successors_clients[conn['node_url']] = httpx.AsyncClient(
+                    base_url=conn["node_url"]
+                )
+            else:
+                # If SSL certificates are provided, use them to create the client
+                self.remote_successors_clients[conn['node_url']] = httpx.AsyncClient(
+                    base_url=conn["node_url"], verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
+                ) 
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
