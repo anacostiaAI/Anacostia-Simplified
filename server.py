@@ -3,7 +3,7 @@ import signal
 import asyncio
 from pydantic import BaseModel
 from urllib.parse import urlparse
-from typing import List, Dict
+from typing import List
 
 from fastapi import FastAPI, status
 import uvicorn
@@ -54,18 +54,13 @@ class PipelineServer(FastAPI):
             self.mount(connector.get_connector_prefix(), connector)          # mount the BaseNodeApp to PipelineWebserver
             self.connectors.append(connector)
         
-        self.predecessor_host = None
-        self.predecessor_port = None
+        self.predecessor_ip_addresses = []
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(connection: PipelineConnectionModel):
-            self.predecessor_host = connection.predecessor_host
-            self.predecessor_port = connection.predecessor_port
-        
-        @self.get("/start", status_code=status.HTTP_200_OK)
-        async def start():
-            print(f"Starting {self.name} Pipeline...")
-            for node in self.pipeline.nodes:
-                node.start_node_lifecycle.set()
+            if f"http://{connection.predecessor_host}:{connection.predecessor_port}" not in self.predecessor_ip_addresses:
+                self.predecessor_ip_addresses.append(
+                    f"http://{connection.predecessor_host}:{connection.predecessor_port}"
+                ) 
 
         @self.post("/finish_connect", status_code=status.HTTP_200_OK)
         async def finish_connect():
@@ -76,9 +71,9 @@ class PipelineServer(FastAPI):
         async with httpx.AsyncClient() as client:
             # Connect to leaf pipeline
             task = []
-            for leaf_ip_address in self.successor_ip_addresses:
+            for successor_ip_address in self.successor_ip_addresses:
                 pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
-                task.append(client.post(f"{leaf_ip_address}/connect", json=pipeline_server_model))
+                task.append(client.post(f"{successor_ip_address}/connect", json=pipeline_server_model))
             await asyncio.gather(*task)
 
             # Set each node's establish_connection event to allow them to connect to their remote predecessors
@@ -91,10 +86,15 @@ class PipelineServer(FastAPI):
             for node in self.pipeline.nodes:
                 node.finished_establishing_connection.wait()
 
-            task = []
-            for leaf_ip_address in self.successor_ip_addresses:
-                task.append(client.post(f"{leaf_ip_address}/finish_connect"))
-            await asyncio.gather(*task)
+            # Start the nodes on the successor pipeline before allowing the nodes to start executing
+            if len(self.successor_ip_addresses) > 0:
+                task = []
+                for successor_ip_address in self.successor_ip_addresses:
+                    task.append(client.post(f"{successor_ip_address}/finish_connect"))
+                await asyncio.gather(*task)
+
+                for node in self.pipeline.nodes:
+                    node.start_node_lifecycle.set()
 
     async def disconnect(self):
         for connector in self.connectors:
