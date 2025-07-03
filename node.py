@@ -142,6 +142,10 @@ class BaseNode(Thread):
         remote_successors: List[Dict[str, str]] = None,
         wait_for_connection: bool = False
     ):
+        if remote_predecessors is not None or remote_successors is not None:
+            if wait_for_connection is False:
+                raise ValueError("Cannot set wait_for_connection to False when either remote_predecessors or remote_successors are provided.")
+
         self.wait_for_connection = wait_for_connection
 
         self.predecessors = list() if predecessors is None else predecessors
