@@ -20,7 +20,14 @@ class PipelineConnectionModel(BaseModel):
 
 
 class PipelineServer(FastAPI):
-    def __init__(self, name: str, pipeline: Pipeline, host: str = "127.0.0.1", port: int = 8000, *args, **kwargs):
+    def __init__(
+        self, 
+        name: str, 
+        pipeline: Pipeline, 
+        host: str = "127.0.0.1", port: int = 8000, 
+        ssl_ca_certs: str = None, ssl_keyfile: str = None, ssl_certfile: str = None, 
+        *args, **kwargs
+    ):
 
         @asynccontextmanager
         async def lifespan(app: PipelineServer):
@@ -34,7 +41,14 @@ class PipelineServer(FastAPI):
         self.host = host
         self.port = port
 
-        config = uvicorn.Config(self, host=self.host, port=self.port)
+        config = uvicorn.Config(
+            app=self, 
+            host=self.host, 
+            port=self.port,
+            ssl_ca_certs=ssl_ca_certs,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile,
+        )
         self.server = uvicorn.Server(config)
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
@@ -46,13 +60,13 @@ class PipelineServer(FastAPI):
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
                 if base_url not in self.remote_successor_clients:
-                    if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
+                    if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
                         self.remote_successor_clients[base_url] = httpx.AsyncClient(base_url=base_url)
                     else:
                         # If SSL certificates are provided, use them to create the client
                         self.remote_successor_clients[base_url] = httpx.AsyncClient(
-                            base_url=base_url, verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-                        ) 
+                            base_url=base_url, verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile)
+                        )
 
         self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:
