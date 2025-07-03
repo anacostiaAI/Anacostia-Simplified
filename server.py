@@ -39,14 +39,14 @@ class PipelineServer(FastAPI):
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         # get the successor ip addresses
-        self.successor_ip_addresses = []
+        self.remote_successor_clients = []
         for node in self.pipeline.nodes:
             for conn in node.remote_successors:
                 parsed = urlparse(conn['node_url'])
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-                if base_url not in self.successor_ip_addresses:
-                    self.successor_ip_addresses.append(base_url)
+                if base_url not in self.remote_successor_clients:
+                    self.remote_successor_clients.append(base_url)
 
         self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:
@@ -71,7 +71,7 @@ class PipelineServer(FastAPI):
         async with httpx.AsyncClient() as client:
             # Connect to leaf pipeline
             task = []
-            for successor_ip_address in self.successor_ip_addresses:
+            for successor_ip_address in self.remote_successor_clients:
                 pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
                 task.append(client.post(f"{successor_ip_address}/connect", json=pipeline_server_model))
             await asyncio.gather(*task)
@@ -87,9 +87,9 @@ class PipelineServer(FastAPI):
                 node.finished_establishing_connection.wait()
 
             # Start the nodes on the successor pipeline before allowing the nodes to start executing
-            if len(self.successor_ip_addresses) > 0:
+            if len(self.remote_successor_clients) > 0:
                 task = []
-                for successor_ip_address in self.successor_ip_addresses:
+                for successor_ip_address in self.remote_successor_clients:
                     task.append(client.post(f"{successor_ip_address}/finish_connect"))
                 await asyncio.gather(*task)
 
