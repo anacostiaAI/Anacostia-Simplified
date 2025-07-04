@@ -4,6 +4,7 @@ import random
 import asyncio
 import httpx
 from pydantic import BaseModel
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, status
 
@@ -18,64 +19,41 @@ class Connector(FastAPI):
     def __init__(
         self, node: 'BaseNode', 
         host: str, port: int, 
-        remote_predecessors: List[Dict[str, str]] = None, 
-        remote_successors: List[Dict[str, str]] = None, 
+        remote_predecessors: List[str] = None, 
+        remote_successors: List[str] = None, 
+        ssl_ca_certs: str = None, ssl_certfile: str = None, ssl_keyfile: str = None,
         *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.node = node
         self.host = host
         self.port = port
+        self.ssl_ca_certs = ssl_ca_certs
+        self.ssl_certfile = ssl_certfile
+        self.ssl_keyfile = ssl_keyfile
 
-        self.remote_predecessors: List[Dict[str, str]] = remote_predecessors if remote_predecessors is not None else []
-        self.remote_successors: List[Dict[str, str]] = remote_successors if remote_successors is not None else []
+        self.remote_predecessors: List[str] = remote_predecessors if remote_predecessors is not None else []
+        self.remote_successors: List[str] = remote_successors if remote_successors is not None else []
 
-        if self.remote_predecessors is None:
-            self.remote_predecessors = []
+        if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
+            # If no SSL certificates are provided, create a client without them
+            print("No SSL certificates provided, using default httpx client")
+            self.client = httpx.AsyncClient()
+        else:
+            # If SSL certificates are provided, use them to create the client
+            print(f"Using SSL certificates: {ssl_ca_certs}, {ssl_certfile}, {ssl_keyfile}")
+            self.client = httpx.AsyncClient(verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile))
 
-        # Create HTTP clients for each remote_predecessor if user provided remote_predecessors
-        self.remote_predecessors_clients: Dict[str, httpx.AsyncClient] = {}
-        for conn in self.remote_predecessors:
-            if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
-                # If no SSL certificates are provided, create a client without them
-                self.remote_predecessors_clients[conn['node_url']] = httpx.AsyncClient(
-                    base_url=conn["node_url"]
-                )
-            else:
-                # If SSL certificates are provided, use them to create the client
-                self.remote_predecessors_clients[conn['node_url']] = httpx.AsyncClient(
-                    base_url=conn["node_url"], verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-                ) 
-
-        if self.remote_successors is None:
-            self.remote_successors = []
-
-        self.remote_successors_clients: Dict[str, httpx.AsyncClient] = {}
-        for conn in self.remote_successors:
-            if 'ssl_ca_certs' not in conn or 'ssl_certfile' not in conn or 'ssl_keyfile' not in conn:
-                # If no SSL certificates are provided, create a client without them
-                self.remote_successors_clients[conn['node_url']] = httpx.AsyncClient(
-                    base_url=conn["node_url"]
-                )
-            else:
-                # If SSL certificates are provided, use them to create the client
-                self.remote_successors_clients[conn['node_url']] = httpx.AsyncClient(
-                    base_url=conn["node_url"], verify=conn['ssl_ca_certs'], cert=(conn['ssl_certfile'], conn['ssl_keyfile'])
-                ) 
+            for predecessor_url in self.remote_predecessors:
+                parsed_url = urlparse(predecessor_url)
+                if parsed_url.scheme != "https":
+                    raise ValueError(f"Invalid URL scheme for predecessor: {predecessor_url}. Must be 'https'.")
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
             self.node.add_remote_predecessor(root.node_url)
-            if root.node_url not in self.remote_predecessors_clients:
-                # Create a new HTTP client for the remote predecessor when predecessor connects
-                self.remote_predecessors_clients[root.node_url] = httpx.AsyncClient(
-                    base_url=root.node_url,
-                    # verify=root.ssl_ca_certs, 
-                    # cert=(root.ssl_certfile, root.ssl_keyfile)
-                )
-
             print(f"'{self.node.name}' connected to remote predecessor {root.node_url}")
-            return ConnectionModel(node_url=f"http://{self.host}:{self.port}/{self.node.name}", node_type=type(self.node).__name__)
+            return ConnectionModel(node_url=self.get_node_url(), node_type=type(self.node).__name__)
         
         @self.post("/forward_signal", status_code=status.HTTP_200_OK)
         async def forward_signal(root: ConnectionModel):
@@ -91,64 +69,59 @@ class Connector(FastAPI):
     def get_connector_prefix(self):
         return f"/{self.node.name}"
     
-    async def close_all_clients(self) -> None:
-        for client in self.remote_predecessors_clients.values():
-            await client.aclose()
-        
-        for client in self.remote_successors_clients.values():
-            await client.aclose()
+    async def close_client(self) -> None:
+        await self.client.aclose()
+    
+    def get_node_url(self) -> str:
+        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
+            return f"http://{self.host}:{self.port}/{self.node.name}"
+        else:
+            return f"https://{self.host}:{self.port}/{self.node.name}"
     
     async def connect(self) -> List[Coroutine]:
-        
-        # Connect each node to its remote successors
+        # Connect each remote successors
         tasks = []
-        for conn in self.node.remote_successors:
-            client = self.remote_successors_clients.get(conn['node_url'])
-
-            if client is None:
-                raise ValueError(f"Remote successor client for {conn['node_url']} not found.")
-
+        for successor_url in self.node.remote_successors:
             json = {
-                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_url": self.get_node_url(),
                 "node_type": type(self.node).__name__
             }
-            tasks.append(client.post("/connect", json=json))
+            tasks.append(self.client.post(f"{successor_url}/connect", json=json))
 
         responses = await asyncio.gather(*tasks)
         return responses
     
     async def signal_remote_successors(self):
         tasks = []
-        for client in self.remote_successors_clients.values():
+        for successor_node_url in self.remote_successors:
             json = {
-                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_url": self.get_node_url(),
                 "node_type": type(self.node).__name__
             }
-            tasks.append(client.post("/forward_signal", json=json))
+            tasks.append(self.client.post(f"{successor_node_url}/forward_signal", json=json))
 
         responses = await asyncio.gather(*tasks)
         return responses
     
     async def signal_remote_predecessors(self):
         tasks = []
-        for client in self.remote_predecessors_clients.values():
+        for predecessor_node_url in self.remote_predecessors:
             json = {
-                "node_url": f"http://{self.host}:{self.port}/{self.node.name}",
+                "node_url": self.get_node_url(),
                 "node_type": type(self.node).__name__
             }
-            tasks.append(client.post("/backward_signal", json=json))
+            tasks.append(self.client.post(f"{predecessor_node_url}/backward_signal", json=json))
 
         responses = await asyncio.gather(*tasks)
         return responses
-    
 
 
 class BaseNode(Thread):
     def __init__(
         self, name: str, 
         predecessors: List['BaseNode'] = None, 
-        remote_predecessors: List[Dict[str, str]] = None, 
-        remote_successors: List[Dict[str, str]] = None,
+        remote_predecessors: List[str] = None, 
+        remote_successors: List[str] = None,
         wait_for_connection: bool = False
     ):
         if remote_predecessors is not None or remote_successors is not None:
@@ -163,7 +136,7 @@ class BaseNode(Thread):
 
         self.successors: List[BaseNode] = list()
         self.remote_successors = list() if remote_successors is None else remote_successors
-        self.successor_events: Dict[str, Event] = {conn['node_url']: Event() for conn in self.remote_successors}
+        self.successor_events: Dict[str, Event] = {successor_url: Event() for successor_url in self.remote_successors}
 
         for event in self.successor_events.values():
             event.set()
@@ -193,10 +166,16 @@ class BaseNode(Thread):
         if url not in self.remote_predecessors:
             self.remote_predecessors.append(url)
             self.predecessors_events[url] = Event()
-    
-    def setup_connector(self, host: str = None, port: int = None) -> Connector:
+
+    def setup_connector(
+        self, host: str = None, port: int = None, 
+        ssl_ca_certs: str = None, ssl_certfile: str = None, ssl_keyfile: str = None
+    ) -> Connector:
+
         self.connector = Connector(
-            node=self, host=host, port=port, remote_predecessors=self.remote_predecessors, remote_successors=self.remote_successors
+            node=self, host=host, port=port, 
+            remote_predecessors=self.remote_predecessors, remote_successors=self.remote_successors,
+            ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
         )
         return self.connector
     

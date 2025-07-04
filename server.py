@@ -15,8 +15,7 @@ from pipeline import Pipeline
 
 
 class PipelineConnectionModel(BaseModel):
-    predecessor_host: str
-    predecessor_port: int
+    predecessor_url: str
 
 
 class PipelineServer(FastAPI):
@@ -40,6 +39,9 @@ class PipelineServer(FastAPI):
         self.pipeline = pipeline
         self.host = host
         self.port = port
+        self.ssl_ca_certs = ssl_ca_certs
+        self.ssl_keyfile = ssl_keyfile
+        self.ssl_certfile = ssl_certfile
 
         config = uvicorn.Config(
             app=self, 
@@ -48,29 +50,39 @@ class PipelineServer(FastAPI):
             ssl_ca_certs=ssl_ca_certs,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
+            access_log=True
         )
         self.server = uvicorn.Server(config)
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
+        if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
+            # If no SSL certificates are provided, create a client without them
+            self.client = httpx.AsyncClient()
+        else:
+            # If SSL certificates are provided, use them to create the client
+            self.client = httpx.AsyncClient(verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile))
+
         # get the successor ip addresses
-        self.remote_successor_clients: Dict[str, httpx.AsyncClient] = {}
+        self.successor_ip_addresses = []
         for node in self.pipeline.nodes:
-            for conn in node.remote_successors:
-                parsed = urlparse(conn['node_url'])
+            for url in node.remote_successors:
+                parsed = urlparse(url)
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-                if base_url not in self.remote_successor_clients:
-                    if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
-                        self.remote_successor_clients[base_url] = httpx.AsyncClient(base_url=base_url)
-                    else:
-                        # If SSL certificates are provided, use them to create the client
-                        self.remote_successor_clients[base_url] = httpx.AsyncClient(
-                            base_url=base_url, verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile)
-                        )
+                if ssl_ca_certs is not None and ssl_certfile is not None and ssl_keyfile is not None:
+                    # Ensure the base URL is using HTTPS if SSL certificates are provided
+                    if parsed.scheme != "https":
+                        raise ValueError(f"Invalid URL scheme for successor: {url}. Must be 'https' when SSL is enabled.")
+
+                if base_url not in self.successor_ip_addresses:
+                    self.successor_ip_addresses.append(base_url)
 
         self.connectors: List[Connector] = []
         for node in self.pipeline.nodes:
-            connector: Connector = node.setup_connector(host=self.host, port=self.port)
+            connector: Connector = node.setup_connector(
+                host=self.host, port=self.port, 
+                ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
+            )
             self.mount(connector.get_connector_prefix(), connector)          # mount the BaseNodeApp to PipelineWebserver
             self.connectors.append(connector)
         
@@ -78,21 +90,31 @@ class PipelineServer(FastAPI):
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(connection: PipelineConnectionModel):
-            predecessor_url = f"http://{connection.predecessor_host}:{connection.predecessor_port}"
-            if predecessor_url not in self.predecessor_ip_addresses:
-                self.predecessor_ip_addresses.append(predecessor_url) 
+            if connection.predecessor_url not in self.predecessor_ip_addresses:
+                self.predecessor_ip_addresses.append(connection.predecessor_url)
 
         @self.post("/finish_connect", status_code=status.HTTP_200_OK)
         async def finish_connect():
             for node in self.pipeline.nodes:
                 node.start_node_lifecycle.set()  # Set each node's start_node_lifecycle event to allow them to start executing
 
+    def get_pipeline_url(self):
+        """
+        Returns the URL of the pipeline server.
+        """
+        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
+            # If no SSL certificates are provided, use HTTP
+            return f"http://{self.host}:{self.port}"
+        else:
+            # If SSL certificates are provided, use HTTPS
+            return f"https://{self.host}:{self.port}"
+    
     async def connect(self):
         # Connect to leaf pipeline
         task = []
-        for client in self.remote_successor_clients.values():
-            pipeline_server_model = PipelineConnectionModel(predecessor_host=self.host, predecessor_port=self.port).model_dump()
-            task.append(client.post("/connect", json=pipeline_server_model))
+        for successor_url in self.successor_ip_addresses:
+            pipeline_server_model = PipelineConnectionModel(predecessor_url=self.get_pipeline_url()).model_dump()
+            task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
         # Set each node's establish_connection event to allow them to connect to their remote predecessors
@@ -106,41 +128,38 @@ class PipelineServer(FastAPI):
             node.finished_establishing_connection.wait()
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing
-        if len(self.remote_successor_clients) > 0:
+        if len(self.successor_ip_addresses) > 0:
             task = []
-            for client in self.remote_successor_clients.values():
-                task.append(client.post("/finish_connect"))
+            for successor_url in self.successor_ip_addresses:
+                task.append(self.client.post(f"{successor_url}/finish_connect"))
             await asyncio.gather(*task)
 
             for node in self.pipeline.nodes:
                 node.start_node_lifecycle.set()
 
     async def disconnect(self):
+        print("Closing clients...")
         for connector in self.connectors:
-            await connector.close_all_clients()
-        
-        for client in self.remote_successor_clients.values():
-            await client.aclose()
+            await connector.close_client()
+
+        await self.client.aclose()
         print("All remote clients closed.")
+    
+    def shutdown(self):
+        """
+        Shutdown the server and close all connections.
+        """
+        print(f"Shutting down {self.name} Webservice...")
+        self.server.should_exit = True
+        self.fastapi_thread.join()
+        print(f"Anacostia Webservice {self.name} Shutdown...")
+
+        print("Killing pipeline...")
+        self.pipeline.terminate_nodes()
+        print("Pipeline Killed.")
 
     def run(self):
-        original_sigint_handler = signal.getsignal(signal.SIGINT)
-
-        def _kill_webserver(sig, frame):
-            print(f"\nCTRL+C Caught!; Killing {self.name} Webservice...")
-            self.server.should_exit = True
-            self.fastapi_thread.join()
-            print(f"Anacostia Webservice {self.name} Killed...")
-
-            print("Killing pipeline...")
-            self.pipeline.terminate_nodes()
-            print("Pipeline Killed.")
-
-            # register the original default kill handler once the pipeline is killed
-            signal.signal(signal.SIGINT, original_sigint_handler)
-
-        # register the kill handler for the webserver
-        signal.signal(signal.SIGINT, _kill_webserver)
+        # start the server in a separate thread
         self.fastapi_thread.start()
 
         # Launch the root pipeline

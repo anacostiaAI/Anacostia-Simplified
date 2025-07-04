@@ -10,21 +10,30 @@ from server import PipelineServer
 mkcert_ca = Path(os.popen("mkcert -CAROOT").read().strip()) / "rootCA.pem"
 mkcert_ca = str(mkcert_ca)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ssl_certfile = os.path.join(BASE_DIR, "certs/certificate_root.pem")
+print(f"SSL Certificate File: {ssl_certfile}")
+ssl_keyfile = os.path.join(BASE_DIR, "certs/private_root.key")
+print(f"SSL Key File: {ssl_keyfile}")
 
 node1 = BaseNode(name='node1')
 node2 = BaseNode(name='node2')
 node3 = BaseNode(
     name='node3', 
     predecessors=[node1, node2], 
-    remote_successors=[{"node_url": "https://127.0.0.1:8001/connector1"}], 
+    remote_successors=["https://127.0.0.1:8001/connector1"], 
     wait_for_connection=True
 )
 
 pipeline = Pipeline([node1, node2, node3])
 service = PipelineServer(
-    name="leaf", pipeline=pipeline, host="127.0.0.1", port=8000, 
+    name="root", pipeline=pipeline, host="127.0.0.1", port=8000, 
     ssl_ca_certs=mkcert_ca,
-    ssl_certfile="./certs/certificate_root.pem",
-    ssl_keyfile="./certs/private_root.pem"
+    ssl_certfile=ssl_certfile,
+    ssl_keyfile=ssl_keyfile
 )
-service.run()
+
+try:
+    service.run()
+except KeyboardInterrupt:
+    service.shutdown()

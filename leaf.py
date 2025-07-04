@@ -10,6 +10,12 @@ from node import BaseNode
 mkcert_ca = Path(os.popen("mkcert -CAROOT").read().strip()) / "rootCA.pem"
 mkcert_ca = str(mkcert_ca)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ssl_certfile = os.path.join(BASE_DIR, "certs/certificate_leaf.pem")
+print(f"SSL Certificate File: {ssl_certfile}")
+ssl_keyfile = os.path.join(BASE_DIR, "certs/private_leaf.key")
+print(f"SSL Key File: {ssl_keyfile}")
+
 
 connector1 = BaseNode(name='connector1', wait_for_connection=True)
 node5 = BaseNode(name='node5', predecessors=[connector1])
@@ -19,7 +25,11 @@ pipeline = Pipeline([connector1, node5, node6])
 service = PipelineServer(
     name="leaf", pipeline=pipeline, host="127.0.0.1", port=8001, 
     ssl_ca_certs=mkcert_ca, 
-    ssl_certfile="./certs/certificate_leaf.pem", 
-    ssl_keyfile="./certs/private_leaf.pem"
+    ssl_certfile=ssl_certfile, 
+    ssl_keyfile=ssl_keyfile
 )
-service.run()
+
+try:
+    service.run()
+except KeyboardInterrupt:
+    service.shutdown()
