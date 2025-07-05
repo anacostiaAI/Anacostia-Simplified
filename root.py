@@ -12,9 +12,7 @@ mkcert_ca = str(mkcert_ca)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ssl_certfile = os.path.join(BASE_DIR, "certs/certificate_root.pem")
-print(f"SSL Certificate File: {ssl_certfile}")
 ssl_keyfile = os.path.join(BASE_DIR, "certs/private_root.key")
-print(f"SSL Key File: {ssl_keyfile}")
 
 node1 = BaseNode(name='node1')
 node2 = BaseNode(name='node2')
