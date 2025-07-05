@@ -35,19 +35,19 @@ class Connector(FastAPI):
         self.remote_predecessors: List[str] = remote_predecessors if remote_predecessors is not None else []
         self.remote_successors: List[str] = remote_successors if remote_successors is not None else []
 
-        if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
-            # If no SSL certificates are provided, create a client without them
-            print("No SSL certificates provided, using default httpx client")
-            self.client = httpx.AsyncClient()
-        else:
-            # If SSL certificates are provided, use them to create the client
-            print(f"Using SSL certificates: {ssl_ca_certs}, {ssl_certfile}, {ssl_keyfile}")
-            self.client = httpx.AsyncClient(verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile))
+        self.client: httpx.AsyncClient = None
 
+        if self.ssl_ca_certs is not None and self.ssl_certfile is not None and self.ssl_keyfile is not None:
+            # If SSL certificates are provided, validate the URLs of remote predecessors
             for predecessor_url in self.remote_predecessors:
                 parsed_url = urlparse(predecessor_url)
                 if parsed_url.scheme != "https":
                     raise ValueError(f"Invalid URL scheme for predecessor: {predecessor_url}. Must be 'https'.")
+            
+            for successor_url in self.remote_successors:
+                parsed_url = urlparse(successor_url)
+                if parsed_url.scheme != "https":
+                    raise ValueError(f"Invalid URL scheme for successor: {successor_url}. Must be 'https'.")
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
@@ -69,6 +69,14 @@ class Connector(FastAPI):
     def get_connector_prefix(self):
         return f"/{self.node.name}"
     
+    def setup_client(self) -> None:
+        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
+            # If no SSL certificates are provided, create a client without them
+            self.client = httpx.AsyncClient()
+        else:
+            # If SSL certificates are provided, use them to create the client
+            self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
+    
     async def close_client(self) -> None:
         await self.client.aclose()
     
@@ -78,20 +86,30 @@ class Connector(FastAPI):
         else:
             return f"https://{self.host}:{self.port}/{self.node.name}"
     
-    async def connect(self) -> List[Coroutine]:
-        # Connect each remote successors
+    async def connect(self, client: httpx.AsyncClient) -> List[Coroutine]:
+        """
+        Connect to all remote predecessors and successors.
+        Returns a list of coroutines that can be awaited to perform the connection.
+        """
+
+        # Note: best practice to create a list of coroutines to be awaited 
+        # and then use `await asyncio.gather` to run them concurrently wherever this method is called.
+        # This is done to avoid the error of "RuntimeError: <asyncio.locks.Event object at 0x106bdef90 [unset]> is bound to a different event loop"
+
         tasks = []
         for successor_url in self.node.remote_successors:
             json = {
                 "node_url": self.get_node_url(),
                 "node_type": type(self.node).__name__
             }
-            tasks.append(self.client.post(f"{successor_url}/connect", json=json))
-
-        responses = await asyncio.gather(*tasks)
-        return responses
+            tasks.append(client.post(f"{successor_url}/connect", json=json))
+        return tasks
     
-    async def signal_remote_successors(self):
+    async def signal_remote_successors(self) -> List[Coroutine]:
+        """
+        Signal all remote successors that the node has finished processing.
+        Returns a list of coroutines that can be awaited to perform the signaling.
+        """
         tasks = []
         for successor_node_url in self.remote_successors:
             json = {
@@ -103,7 +121,11 @@ class Connector(FastAPI):
         responses = await asyncio.gather(*tasks)
         return responses
     
-    async def signal_remote_predecessors(self):
+    async def signal_remote_predecessors(self) -> List[Coroutine]:
+        """
+        Signal all remote predecessors that the node has finished processing.
+        Returns a list of coroutines that can be awaited to perform the signaling.
+        """
         tasks = []
         for predecessor_node_url in self.remote_predecessors:
             json = {
@@ -149,13 +171,8 @@ class BaseNode(Thread):
         self.exit_event = Event()
         self.pause_event = Event()
 
-        self.start_establishing_connection = Event()
-        self.finished_establishing_connection = Event()
         self.start_node_lifecycle = Event()
-        
         if not self.wait_for_connection:
-            self.start_establishing_connection.set()
-            self.finished_establishing_connection.set()
             self.start_node_lifecycle.set()
         
         self.pause_event.set()
@@ -220,8 +237,6 @@ class BaseNode(Thread):
     def exit(self):
         # set all events so loop can continue to next checkpoint and break out of loop
         self.start_node_lifecycle.set()
-        self.finished_establishing_connection.set()
-        self.start_establishing_connection.set()
         self.pause_event.set()
         self.exit_event.set()
 
@@ -233,18 +248,8 @@ class BaseNode(Thread):
     
     async def node_lifecycle(self):
         if self.wait_for_connection:
-            print(f'{self.name} waiting for permission to establish connection')
-            self.start_establishing_connection.wait()
-            print(f'{self.name} permission granted, establishing connection')
-        
-            print(f'{self.name} connecting to remote successors {self.remote_successors}')
-            await self.connector.connect()
-            print(f'{self.name} connected to remote successors {self.remote_successors}')
-            
-            self.finished_establishing_connection.set()
-            print(f'{self.name} finished establishing connection, waiting for signal from PipelineServer to run')
-
             self.start_node_lifecycle.wait()
+            self.connector.setup_client()
             print(f'{self.name} connection established, proceeding to run')
 
         while self.exit_event.is_set() is False:

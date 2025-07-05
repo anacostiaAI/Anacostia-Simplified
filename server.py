@@ -117,15 +117,10 @@ class PipelineServer(FastAPI):
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
-        # Set each node's establish_connection event to allow them to connect to their remote predecessors
-        print("Setting all nodes to establish connection...")
-        for node in self.pipeline.nodes:
-            node.start_establishing_connection.set()
-
-        # Wait for all nodes to finish establishing connection
-        print("Waiting for all nodes to finish establishing connection...")
-        for node in self.pipeline.nodes:
-            node.finished_establishing_connection.wait()
+        tasks = []
+        for connector in self.connectors:
+            tasks.extend(await connector.connect(client=self.client))
+        await asyncio.gather(*tasks)
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing
         if len(self.successor_ip_addresses) > 0:
