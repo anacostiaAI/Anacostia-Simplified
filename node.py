@@ -21,7 +21,7 @@ class Connector(FastAPI):
         host: str, port: int, 
         remote_predecessors: List[str] = None, 
         remote_successors: List[str] = None, 
-        ssl_ca_certs: str = None, ssl_certfile: str = None, ssl_keyfile: str = None,
+        ssl_ca_certs: bool | str = False, ssl_certfile: str = None, ssl_keyfile: str = None,
         *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -36,21 +36,17 @@ class Connector(FastAPI):
         self.remote_successors: List[str] = remote_successors if remote_successors is not None else []
 
         self.client: httpx.AsyncClient = None
-        self.scheme = "http"
 
-        if self.ssl_ca_certs is not None and self.ssl_certfile is not None and self.ssl_keyfile is not None:
-            self.scheme = "https"
-
-            # If SSL certificates are provided, validate the URLs of remote predecessors
-            for predecessor_url in self.remote_predecessors:
-                parsed_url = urlparse(predecessor_url)
-                if parsed_url.scheme != "https":
-                    raise ValueError(f"Invalid URL scheme for predecessor: {predecessor_url}. Must be 'https'.")
-            
-            for successor_url in self.remote_successors:
-                parsed_url = urlparse(successor_url)
-                if parsed_url.scheme != "https":
-                    raise ValueError(f"Invalid URL scheme for successor: {successor_url}. Must be 'https'.")
+        # If SSL certificates are provided, validate the URLs of remote predecessors
+        for predecessor_url in self.remote_predecessors:
+            parsed_url = urlparse(predecessor_url)
+            if parsed_url.scheme != "https":
+                raise ValueError(f"Invalid URL scheme for predecessor: {predecessor_url}. Must be 'https'.")
+        
+        for successor_url in self.remote_successors:
+            parsed_url = urlparse(successor_url)
+            if parsed_url.scheme != "https":
+                raise ValueError(f"Invalid URL scheme for successor: {successor_url}. Must be 'https'.")
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
         async def connect(root: ConnectionModel) -> ConnectionModel:
@@ -78,13 +74,16 @@ class Connector(FastAPI):
             self.client = httpx.AsyncClient()
         else:
             # If SSL certificates are provided, use them to create the client
-            self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
+            try:
+                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
+            except httpx.ConnectError as e:
+                raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
     
     async def close_client(self) -> None:
         await self.client.aclose()
     
     def get_node_url(self) -> str:
-        return f"{self.scheme}://{self.host}:{self.port}/{self.node.name}"
+        return f"https://{self.host}:{self.port}/{self.node.name}"
 
     async def connect(self, client: httpx.AsyncClient) -> List[Coroutine]:
         """

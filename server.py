@@ -3,7 +3,7 @@ import signal
 import asyncio
 from pydantic import BaseModel
 from urllib.parse import urlparse
-from typing import List, Dict
+from typing import List
 
 from fastapi import FastAPI, status
 import uvicorn
@@ -45,7 +45,7 @@ class PipelineServer(FastAPI):
 
         config = uvicorn.Config(
             app=self, 
-            host=self.host, 
+            host="0.0.0.0", 
             port=self.port,
             ssl_ca_certs=ssl_ca_certs,
             ssl_keyfile=ssl_keyfile,
@@ -55,13 +55,6 @@ class PipelineServer(FastAPI):
         self.server = uvicorn.Server(config)
         self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
-        if ssl_ca_certs is None or ssl_certfile is None or ssl_keyfile is None:
-            # If no SSL certificates are provided, create a client without them
-            self.client = httpx.AsyncClient()
-        else:
-            # If SSL certificates are provided, use them to create the client
-            self.client = httpx.AsyncClient(verify=ssl_ca_certs, cert=(ssl_certfile, ssl_keyfile))
-
         # get the successor ip addresses
         self.successor_ip_addresses = []
         for node in self.pipeline.nodes:
@@ -69,10 +62,9 @@ class PipelineServer(FastAPI):
                 parsed = urlparse(url)
                 base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-                if ssl_ca_certs is not None and ssl_certfile is not None and ssl_keyfile is not None:
-                    # Ensure the base URL is using HTTPS if SSL certificates are provided
-                    if parsed.scheme != "https":
-                        raise ValueError(f"Invalid URL scheme for successor: {url}. Must be 'https' when SSL is enabled.")
+                # Ensure the base URL is using HTTPS if SSL certificates are provided
+                if ssl_ca_certs is not False and (parsed.scheme != "https"):
+                    raise ValueError(f"Invalid URL scheme for successor: {url}. Must be 'https' when SSL is enabled.")
 
                 if base_url not in self.successor_ip_addresses:
                     self.successor_ip_addresses.append(base_url)
@@ -97,23 +89,22 @@ class PipelineServer(FastAPI):
         async def finish_connect():
             for node in self.pipeline.nodes:
                 node.start_node_lifecycle.set()  # Set each node's start_node_lifecycle event to allow them to start executing
-
-    def get_pipeline_url(self):
-        """
-        Returns the URL of the pipeline server.
-        """
-        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
-            # If no SSL certificates are provided, use HTTP
-            return f"http://{self.host}:{self.port}"
-        else:
-            # If SSL certificates are provided, use HTTPS
-            return f"https://{self.host}:{self.port}"
     
     async def connect(self):
+        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
+            # If no SSL certificates are provided, create a client without them
+            self.client = httpx.AsyncClient()
+        else:
+            # If SSL certificates are provided, use them to create the client
+            try:
+                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
+            except httpx.ConnectError as e:
+                raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
+
         # Connect to leaf pipeline
         task = []
         for successor_url in self.successor_ip_addresses:
-            pipeline_server_model = PipelineConnectionModel(predecessor_url=self.get_pipeline_url()).model_dump()
+            pipeline_server_model = PipelineConnectionModel(predecessor_url=f"https://{self.host}:{self.port}").model_dump()
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
