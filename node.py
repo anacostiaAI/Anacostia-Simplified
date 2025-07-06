@@ -91,11 +91,6 @@ class Connector(FastAPI):
         Connect to all remote predecessors and successors.
         Returns a list of coroutines that can be awaited to perform the connection.
         """
-
-        # Note: best practice to create a list of coroutines to be awaited 
-        # and then use `await asyncio.gather` to run them concurrently wherever this method is called.
-        # This is done to avoid the error of "RuntimeError: <asyncio.locks.Event object at 0x106bdef90 [unset]> is bound to a different event loop"
-
         tasks = []
         for successor_url in self.node.remote_successors:
             json = {
