@@ -117,10 +117,8 @@ class PipelineServer(FastAPI):
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
-        tasks = []
         for connector in self.connectors:
-            tasks.extend(await connector.connect(client=self.client))
-        await asyncio.gather(*tasks)
+            await connector.connect(client=self.client)
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing
         if len(self.successor_ip_addresses) > 0:
@@ -134,9 +132,6 @@ class PipelineServer(FastAPI):
 
     async def disconnect(self):
         print("Closing clients...")
-        for connector in self.connectors:
-            await connector.close_client()
-
         await self.client.aclose()
         print("All remote clients closed.")
     

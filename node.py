@@ -103,7 +103,9 @@ class Connector(FastAPI):
                 "node_type": type(self.node).__name__
             }
             tasks.append(client.post(f"{successor_url}/connect", json=json))
-        return tasks
+
+        responses = await asyncio.gather(*tasks)
+        return responses
     
     async def signal_remote_successors(self) -> List[Coroutine]:
         """
@@ -249,31 +251,35 @@ class BaseNode(Thread):
     async def node_lifecycle(self):
         if self.wait_for_connection:
             self.start_node_lifecycle.wait()
-            self.connector.setup_client()
+            self.connector.setup_client()   # create the client in the node lifecycle thread
             print(f'{self.name} connection established, proceeding to run')
 
         while self.exit_event.is_set() is False:
 
-            if self.exit_event.is_set(): return
+            if self.exit_event.is_set(): break
             print(f'{self.name} waiting for predecessors')
             self.wait_for_predecessors()
 
-            if self.exit_event.is_set(): return
+            if self.exit_event.is_set(): break
             print(f'{self.name} is running')
             await asyncio.sleep(random.randint(1, 3))
             print(f'{self.name} is done')
 
-            if self.exit_event.is_set(): return
+            if self.exit_event.is_set(): break
             print(f'{self.name} signalling successors')
             await self.signal_successors()
 
-            if self.exit_event.is_set(): return
+            if self.exit_event.is_set(): break
             print(f'{self.name} waiting for successors')
             self.wait_for_successors()
 
-            if self.exit_event.is_set(): return
+            if self.exit_event.is_set(): break
             print(f'{self.name} signalling predecessors')
             await self.signal_predecessors()
+        
+        if self.wait_for_connection:
+            print(f'{self.name} exiting node lifecycle and closing connector client')
+            await self.connector.close_client()
     
     def run(self) -> None:
         asyncio.run(self.node_lifecycle())
