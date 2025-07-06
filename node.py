@@ -36,8 +36,11 @@ class Connector(FastAPI):
         self.remote_successors: List[str] = remote_successors if remote_successors is not None else []
 
         self.client: httpx.AsyncClient = None
+        self.scheme = "http"
 
         if self.ssl_ca_certs is not None and self.ssl_certfile is not None and self.ssl_keyfile is not None:
+            self.scheme = "https"
+
             # If SSL certificates are provided, validate the URLs of remote predecessors
             for predecessor_url in self.remote_predecessors:
                 parsed_url = urlparse(predecessor_url)
@@ -81,11 +84,8 @@ class Connector(FastAPI):
         await self.client.aclose()
     
     def get_node_url(self) -> str:
-        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
-            return f"http://{self.host}:{self.port}/{self.node.name}"
-        else:
-            return f"https://{self.host}:{self.port}/{self.node.name}"
-    
+        return f"{self.scheme}://{self.host}:{self.port}/{self.node.name}"
+
     async def connect(self, client: httpx.AsyncClient) -> List[Coroutine]:
         """
         Connect to all remote predecessors and successors.
