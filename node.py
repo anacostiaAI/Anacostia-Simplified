@@ -199,10 +199,6 @@ class BaseNode(Thread):
         Set the event loop for the connector. This is done to ensure the connector uses the same event loop as the server.
         """
         self.loop = loop
-        asyncio.set_event_loop(self.loop)
-
-        # Note: in the future, the event loop will be set for BaseServer and BaseClient in Anacostia here as well
-        self.connector.set_event_loop(self.loop)  # Set the event loop for the connector
 
     def setup_connector(
         self, host: str = None, port: int = None, 
@@ -295,4 +291,5 @@ class BaseNode(Thread):
             self.signal_predecessors()
 
     def run(self) -> None:
+        asyncio.set_event_loop(self.loop)
         self.node_lifecycle()
