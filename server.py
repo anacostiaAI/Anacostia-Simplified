@@ -30,6 +30,7 @@ class PipelineServer(FastAPI):
 
         @asynccontextmanager
         async def lifespan(app: PipelineServer):
+            app.loop = asyncio.get_event_loop()     # Get the event loop of the FastAPI app
             await app.connect()     # Connect to the leaf services
             yield
             await app.disconnect()  # Disconnect from the leaf services
@@ -42,6 +43,8 @@ class PipelineServer(FastAPI):
         self.ssl_ca_certs = ssl_ca_certs
         self.ssl_keyfile = ssl_keyfile
         self.ssl_certfile = ssl_certfile
+
+        self.loop: asyncio.AbstractEventLoop = None
 
         config = uvicorn.Config(
             app=self, 
@@ -108,7 +111,8 @@ class PipelineServer(FastAPI):
         await asyncio.gather(*task)
 
         for connector in self.connectors:
-            await connector.connect(client=self.client)
+            connector.set_event_loop(self.loop)  # Set the event loop for the connector
+            await connector.connect()
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing
         if len(self.successor_ip_addresses) > 0:
