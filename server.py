@@ -110,8 +110,10 @@ class PipelineServer(FastAPI):
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
+        for node in self.pipeline.nodes:
+            node.set_event_loop(self.loop)
+
         for connector in self.connectors:
-            connector.set_event_loop(self.loop)  # Set the event loop for the connector
             await connector.connect()
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing

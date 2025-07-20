@@ -85,7 +85,6 @@ class Connector(FastAPI):
         Set the event loop for the connector. This is done to ensure the connector uses the same event loop as the server.
         """
         self.loop = loop
-        asyncio.set_event_loop(loop)
 
     def get_node_url(self) -> str:
         return f"https://{self.host}:{self.port}/{self.node.name}"
@@ -161,6 +160,8 @@ class BaseNode(Thread):
 
         self.wait_for_connection = wait_for_connection
 
+        self.loop: asyncio.AbstractEventLoop = None
+
         self.predecessors = list() if predecessors is None else predecessors
         self.remote_predecessors = list() if remote_predecessors is None else remote_predecessors
         self.predecessors_events: Dict[str, Event] = {predecessor.name: Event() for predecessor in self.predecessors}
@@ -192,6 +193,16 @@ class BaseNode(Thread):
         if url not in self.remote_predecessors:
             self.remote_predecessors.append(url)
             self.predecessors_events[url] = Event()
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """
+        Set the event loop for the connector. This is done to ensure the connector uses the same event loop as the server.
+        """
+        self.loop = loop
+        asyncio.set_event_loop(self.loop)
+
+        # Note: in the future, the event loop will be set for BaseServer and BaseClient in Anacostia here as well
+        self.connector.set_event_loop(self.loop)  # Set the event loop for the connector
 
     def setup_connector(
         self, host: str = None, port: int = None, 
