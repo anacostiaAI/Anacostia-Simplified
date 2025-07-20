@@ -37,19 +37,6 @@ class Pipeline:
         print("All nodes terminated")
     
     def run(self) -> None:
-        original_sigint_handler = signal.getsignal(signal.SIGINT)
-
-        def _kill_webserver(sig, frame):
-            print("\nCTRL+C Caught!; Shutting down nodes...")
-            self.terminate_nodes()
-            print("Nodes shutdown.")
-
-            # register the original default kill handler once the pipeline is killed
-            signal.signal(signal.SIGINT, original_sigint_handler)
-
-        # register the kill handler for the webserver
-        signal.signal(signal.SIGINT, _kill_webserver)
-
         print("Launching Pipeline...")
         self.launch_nodes()
 

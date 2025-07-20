@@ -53,7 +53,6 @@ class PipelineServer(FastAPI):
             access_log=True
         )
         self.server = uvicorn.Server(config)
-        self.fastapi_thread = threading.Thread(target=self.server.run, name=name)
 
         # get the successor ip addresses
         self.successor_ip_addresses = []
@@ -130,25 +129,18 @@ class PipelineServer(FastAPI):
         """
         Shutdown the server and close all connections.
         """
-        print(f"Shutting down {self.name} Webservice...")
-        self.server.should_exit = True
-        self.fastapi_thread.join()
-        print(f"Anacostia Webservice {self.name} Shutdown...")
 
         print("Killing pipeline...")
         self.pipeline.terminate_nodes()
         print("Pipeline Killed.")
 
-    def run(self):
-        # start the server in a separate thread
-        self.fastapi_thread.start()
+        print(f"Shutting down {self.name} Webservice...")
+        self.server.should_exit = True
+        print(f"Anacostia Webservice {self.name} Shutdown...")
 
+    def run(self):
         # Launch the root pipeline
         self.pipeline.launch_nodes()
 
-        # keep the main thread open; this is done to avoid an error in python 3.12 "RuntimeError: can't create new thread at interpreter shutdown"
-        # and to avoid "RuntimeError: can't register atexit after shutdown" in python 3.9
-        for thread in threading.enumerate():
-            if thread.daemon or thread is threading.current_thread():
-                continue
-            thread.join()
+        # start the server
+        self.server.run()
