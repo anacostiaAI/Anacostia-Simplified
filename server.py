@@ -11,6 +11,7 @@ import httpx
 from contextlib import asynccontextmanager
 
 from node import Connector
+from api import BaseServer, BaseClient
 from pipeline import Pipeline
 
 
@@ -23,6 +24,7 @@ class PipelineServer(FastAPI):
         self, 
         name: str, 
         pipeline: Pipeline, 
+        remote_clients: List[BaseClient] = None,
         host: str = "127.0.0.1", port: int = 8000, 
         ssl_ca_certs: str = None, ssl_keyfile: str = None, ssl_certfile: str = None, 
         *args, **kwargs
@@ -45,6 +47,8 @@ class PipelineServer(FastAPI):
         self.ssl_certfile = ssl_certfile
 
         self.loop: asyncio.AbstractEventLoop = None
+
+        self.remote_clients = remote_clients if remote_clients is not None else []
 
         config = uvicorn.Config(
             app=self, 
@@ -72,6 +76,7 @@ class PipelineServer(FastAPI):
                     self.successor_ip_addresses.append(base_url)
 
         self.connectors: List[Connector] = []
+        self.node_servers: List[BaseServer] = []
         for node in self.pipeline.nodes:
             connector: Connector = node.setup_connector(
                 host=self.host, port=self.port, 
@@ -79,7 +84,21 @@ class PipelineServer(FastAPI):
             )
             self.mount(connector.get_connector_prefix(), connector)          # mount the BaseNodeApp to PipelineWebserver
             self.connectors.append(connector)
+
+            node_server: BaseServer = node.setup_server(
+                host=self.host, port=self.port, 
+                ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
+            )
+            self.mount(node_server.get_server_prefix(), node_server)  # mount the BaseNodeApp
+            self.node_servers.append(node_server)
         
+        for remote_client in self.remote_clients:
+            remote_client.set_credentials(
+                host=self.host, port=self.port, 
+                ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile, ssl_ca_certs=ssl_ca_certs
+            )
+            self.mount(remote_client.get_client_prefix(), remote_client)
+
         self.predecessor_ip_addresses = []
 
         @self.post("/connect", status_code=status.HTTP_200_OK)
@@ -112,9 +131,15 @@ class PipelineServer(FastAPI):
 
         for node in self.pipeline.nodes:
             node.set_event_loop(self.loop)
+        
+        for node_server in self.node_servers:
+            node_server.set_event_loop(self.loop)
+        
+        for remote_client in self.remote_clients:
+            remote_client.set_event_loop(self.loop)
 
         for connector in self.connectors:
-            connector.set_event_loop(self.loop)  # Set the event loop for the connector
+            connector.set_event_loop(self.loop)
             await connector.connect()
 
         # Start the nodes on the successor pipeline before allowing the nodes to start executing

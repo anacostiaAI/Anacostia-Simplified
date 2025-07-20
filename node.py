@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import time
 
 from fastapi import FastAPI, status
+from api import BaseServer
 
 
 
@@ -211,6 +212,17 @@ class BaseNode(Thread):
             ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
         )
         return self.connector
+    
+    def setup_server(
+        self, host: str = None, port: int = None, 
+        ssl_ca_certs: str = None, ssl_certfile: str = None, ssl_keyfile: str = None
+    ) -> BaseServer:
+        from api import BaseServer
+        server = BaseServer(
+            name=self.name, host=host, port=port, 
+            ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
+        )
+        return server
     
     def signal_successors(self):
         if len(self.successors) > 0:
