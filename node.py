@@ -5,6 +5,7 @@ import asyncio
 import httpx
 from pydantic import BaseModel
 from urllib.parse import urlparse
+import time
 
 from fastapi import FastAPI, status
 
@@ -254,7 +255,7 @@ class BaseNode(Thread):
         for event in self.predecessors_events.values():
             event.set()
     
-    async def node_lifecycle(self):
+    def node_lifecycle(self):
         if self.wait_for_connection:
             self.start_node_lifecycle.wait()
             print(f'{self.name} connection established, proceeding to run')
@@ -267,7 +268,7 @@ class BaseNode(Thread):
 
             if self.exit_event.is_set(): break
             print(f'{self.name} is running')
-            await asyncio.sleep(random.randint(1, 3))
+            time.sleep(random.randint(1, 3))
             print(f'{self.name} is done')
 
             if self.exit_event.is_set(): break
@@ -283,4 +284,4 @@ class BaseNode(Thread):
             self.signal_predecessors()
 
     def run(self) -> None:
-        asyncio.run(self.node_lifecycle())
+        self.node_lifecycle()
