@@ -15,6 +15,7 @@ class ConnectionModel(BaseModel):
     node_type: str
 
 
+
 class Connector(FastAPI):
     def __init__(
         self, node: 'BaseNode', 
@@ -35,6 +36,8 @@ class Connector(FastAPI):
         self.remote_predecessors: List[str] = remote_predecessors if remote_predecessors is not None else []
         self.remote_successors: List[str] = remote_successors if remote_successors is not None else []
 
+        # Note: the client will be bound to the PipelineServer's event loop;
+        # this happens when the Connector is initialized when PipelineServer call node.setup_connector()
         if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
             # If no SSL certificates are provided, create a client without them
             self.client = httpx.AsyncClient()
@@ -76,28 +79,13 @@ class Connector(FastAPI):
     def get_connector_prefix(self):
         return f"/{self.node.name}"
     
-    def setup_client(self) -> None:
-        if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
-            # If no SSL certificates are provided, create a client without them
-            self.client = httpx.AsyncClient()
-        else:
-            # If SSL certificates are provided, use them to create the client
-            try:
-                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
-            except httpx.ConnectError as e:
-                raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
-    
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """
-        Set the event loop for the connector.
-        This is useful for ensuring that the connector uses the same event loop as the server.
+        Set the event loop for the connector. This is done to ensure the connector uses the same event loop as the server.
         """
         self.loop = loop
         asyncio.set_event_loop(loop)
 
-    async def close_client(self) -> None:
-        await self.client.aclose()
-    
     def get_node_url(self) -> str:
         return f"https://{self.host}:{self.port}/{self.node.name}"
 
@@ -294,9 +282,5 @@ class BaseNode(Thread):
             print(f'{self.name} signalling predecessors')
             self.signal_predecessors()
 
-        if self.wait_for_connection:
-            print(f'{self.name} exiting node lifecycle and closing connector client')
-            await self.connector.close_client()
-    
     def run(self) -> None:
         asyncio.run(self.node_lifecycle())
