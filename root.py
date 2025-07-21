@@ -20,7 +20,7 @@ node3 = BaseNode(
     name='node3', 
     predecessors=[node1, node2], 
     remote_successors=["https://127.0.0.1:8001/connector1"], 
-    client_url="https://127.0.0.1:8001/client1/api/client",
+    client_url="https://127.0.0.1:8001/client1",
     wait_for_connection=True
 )
 

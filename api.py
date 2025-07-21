@@ -76,7 +76,7 @@ class BaseServer(FastAPI):
             if parsed_url.scheme != "https":
                 raise ValueError(f"Invalid client URL scheme: {self.client_url}. Must be 'https' when SSL certificates are provided.")
 
-            response = await self.client.post(f"/connect", json={"url": self.get_server_url()})
+            response = await self.client.post(f"/api/client/connect", json={"url": self.get_server_url()})
             message = response.json()["message"]
             print(f"Server {self.name} connected to client at {self.client_url}: {message}")
 
