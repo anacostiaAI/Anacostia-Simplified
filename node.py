@@ -311,5 +311,4 @@ class BaseNode(Thread):
             self.signal_predecessors()
 
     def run(self) -> None:
-        asyncio.set_event_loop(self.loop)
         self.node_lifecycle()
