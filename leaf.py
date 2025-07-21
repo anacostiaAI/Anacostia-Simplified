@@ -16,8 +16,20 @@ ssl_certfile = os.path.join(BASE_DIR, "certs/certificate_leaf.pem")
 ssl_keyfile = os.path.join(BASE_DIR, "certs/private_leaf.key")
 
 
-client1 = BaseClient(name='client1', server_url="https://127.0.0.1:8001/node1/api/server")
-connector1 = BaseNode(name='connector1', wait_for_connection=True)
+class ConnectorNode(BaseNode):
+    def __init__(self, name: str, base_client: BaseClient):
+        super().__init__(name=name, wait_for_connection=True)
+        self.base_client = base_client
+    
+    def action(self):
+        """
+        result = self.base_client.health_check()
+        print(f"Health check result for {self.name}: {result}")
+        """
+        print("ConnectorNode action executed")
+
+client1 = BaseClient(name='client1')
+connector1 = ConnectorNode(name='connector1', base_client=client1)
 node5 = BaseNode(name='node5', predecessors=[connector1])
 node6 = BaseNode(name='node6', predecessors=[connector1])
 

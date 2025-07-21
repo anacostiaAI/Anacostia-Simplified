@@ -153,6 +153,7 @@ class BaseNode(Thread):
         predecessors: List['BaseNode'] = None, 
         remote_predecessors: List[str] = None, 
         remote_successors: List[str] = None,
+        client_url: str = None,
         wait_for_connection: bool = False
     ):
         if remote_predecessors is not None or remote_successors is not None:
@@ -170,6 +171,7 @@ class BaseNode(Thread):
         self.successors: List[BaseNode] = list()
         self.remote_successors = list() if remote_successors is None else remote_successors
         self.successor_events: Dict[str, Event] = {successor_url: Event() for successor_url in self.remote_successors}
+        self.client_url = client_url
 
         for event in self.successor_events.values():
             event.set()
@@ -217,13 +219,13 @@ class BaseNode(Thread):
         self, host: str = None, port: int = None, 
         ssl_ca_certs: str = None, ssl_certfile: str = None, ssl_keyfile: str = None
     ) -> BaseServer:
-        from api import BaseServer
-        server = BaseServer(
-            name=self.name, host=host, port=port, 
+
+        self.server = BaseServer(
+            name=self.name, host=host, port=port, client_url=self.client_url,
             ssl_ca_certs=ssl_ca_certs, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
         )
-        return server
-    
+        return self.server
+
     def signal_successors(self):
         if len(self.successors) > 0:
             for successor in self.successors:
@@ -274,6 +276,12 @@ class BaseNode(Thread):
         for event in self.predecessors_events.values():
             event.set()
     
+    def action(self):
+        """
+        This method should be overridden by subclasses to define the node's action.
+        """
+        time.sleep(random.randint(1, 3))
+    
     def node_lifecycle(self):
         if self.wait_for_connection:
             self.start_node_lifecycle.wait()
@@ -287,7 +295,7 @@ class BaseNode(Thread):
 
             if self.exit_event.is_set(): break
             print(f'{self.name} is running')
-            time.sleep(random.randint(1, 3))
+            self.action()
             print(f'{self.name} is done')
 
             if self.exit_event.is_set(): break

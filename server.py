@@ -134,7 +134,8 @@ class PipelineServer(FastAPI):
         
         for node_server in self.node_servers:
             node_server.set_event_loop(self.loop)
-        
+            await node_server.connect()
+
         for remote_client in self.remote_clients:
             remote_client.set_event_loop(self.loop)
 
