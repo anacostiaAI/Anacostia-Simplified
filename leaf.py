@@ -22,11 +22,8 @@ class ConnectorNode(BaseNode):
         self.base_client = base_client
     
     def action(self):
-        """
         result = self.base_client.health_check()
         print(f"Health check result for {self.name}: {result}")
-        """
-        print("ConnectorNode action executed")
 
 client1 = BaseClient(name='client1')
 connector1 = ConnectorNode(name='connector1', base_client=client1)

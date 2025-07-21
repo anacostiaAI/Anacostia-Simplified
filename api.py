@@ -49,8 +49,9 @@ class BaseServer(FastAPI):
         async def root():
             return {"message": f"Welcome to the {self.name} server!"}
 
-        @self.get("/health")
+        @self.get("/health", status_code=status.HTTP_200_OK)
         async def health_check():
+            print(f"Health check for {self.name} server")
             return {"status": "healthy"}
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:

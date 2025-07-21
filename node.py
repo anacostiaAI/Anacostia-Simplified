@@ -65,8 +65,8 @@ class Connector(FastAPI):
         async def connect(root: ConnectionModel) -> ConnectionModel:
             self.node.add_remote_predecessor(root.node_url)
             print(f"'{self.node.name}' connected to remote predecessor {root.node_url}")
-            return ConnectionModel(node_url=self.get_node_url(), node_type=type(self.node).__name__)
-        
+            return ConnectionModel(node_url=f"https://{self.host}:{self.port}{self.get_connector_prefix()}", node_type=type(self.node).__name__)
+
         @self.post("/forward_signal", status_code=status.HTTP_200_OK)
         async def forward_signal(root: ConnectionModel):
             self.node.predecessors_events[root.node_url].set()
@@ -79,7 +79,7 @@ class Connector(FastAPI):
             return {"message": "Signalled predecessors"}
     
     def get_connector_prefix(self):
-        return f"/{self.node.name}"
+        return f"/{self.node.name}/connector"
     
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """
@@ -101,7 +101,7 @@ class Connector(FastAPI):
                 "node_url": self.get_node_url(),
                 "node_type": type(self.node).__name__
             }
-            tasks.append(self.client.post(f"{successor_url}/connect", json=json))
+            tasks.append(self.client.post(f"{successor_url}/connector/connect", json=json))
 
         responses = await asyncio.gather(*tasks)
         return responses
@@ -119,13 +119,17 @@ class Connector(FastAPI):
                     "node_url": self.get_node_url(),
                     "node_type": type(self.node).__name__
                 }
-                tasks.append(self.client.post(f"{successor_node_url}/forward_signal", json=json))
+                tasks.append(self.client.post(f"{successor_node_url}/connector/forward_signal", json=json))
 
             responses = await asyncio.gather(*tasks)
             return responses
 
-        asyncio.run_coroutine_threadsafe(_signal_remote_successors(), self.loop)
-    
+        if self.loop.is_running():
+            response = asyncio.run_coroutine_threadsafe(_signal_remote_successors(), self.loop)
+            return response.result()
+        else:
+            raise RuntimeError("Event loop is not running. Cannot signal remote successors.")
+
     def signal_remote_predecessors(self) -> List[Coroutine]:
         """
         Signal all remote predecessors that the node has finished processing.
@@ -139,12 +143,16 @@ class Connector(FastAPI):
                     "node_url": self.get_node_url(),
                     "node_type": type(self.node).__name__
                 }
-                tasks.append(self.client.post(f"{predecessor_node_url}/backward_signal", json=json))
+                tasks.append(self.client.post(f"{predecessor_node_url}/connector/backward_signal", json=json))
 
             responses = await asyncio.gather(*tasks)
             return responses
         
-        asyncio.run_coroutine_threadsafe(_signal_remote_predecessors(), self.loop)
+        if self.loop.is_running():
+            response = asyncio.run_coroutine_threadsafe(_signal_remote_predecessors(), self.loop)
+            return response.result()
+        else:
+            raise RuntimeError("Event loop is not running. Cannot signal remote predecessors.")
 
 
 class BaseNode(Thread):
