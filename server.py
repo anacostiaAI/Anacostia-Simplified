@@ -4,6 +4,7 @@ import asyncio
 from pydantic import BaseModel
 from urllib.parse import urlparse
 from typing import List
+import time
 
 from fastapi import FastAPI, status
 import uvicorn
@@ -33,8 +34,15 @@ class PipelineServer(FastAPI):
         @asynccontextmanager
         async def lifespan(app: PipelineServer):
             app.loop = asyncio.get_event_loop()     # Get the event loop of the FastAPI app
+            
+            # Launch the root pipeline
+            app.pipeline.launch_nodes()
+
             await app.connect()     # Connect to the leaf services
+
             yield
+            
+            app.pipeline.terminate_nodes()  # Terminate the root pipeline
             await app.disconnect()  # Disconnect from the leaf services
 
         super().__init__(lifespan=lifespan, *args, **kwargs)
@@ -114,11 +122,11 @@ class PipelineServer(FastAPI):
     async def connect(self):
         if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
             # If no SSL certificates are provided, create a client without them
-            self.client = httpx.AsyncClient()
+            self.client = httpx.AsyncClient(headers={"Connection": "close"})
         else:
             # If SSL certificates are provided, use them to create the client
             try:
-                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile))
+                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), headers={"Connection": "close"})
             except httpx.ConnectError as e:
                 raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
 
@@ -154,12 +162,12 @@ class PipelineServer(FastAPI):
                 node.start_node_lifecycle.set()
 
     async def disconnect(self):
-        print("Closing clients...")
+        print(f"[{time.time():.2f}] Closing clients...")
         await self.client.aclose()
         for connector in self.connectors:
             await connector.client.aclose()
-        print("All remote clients closed.")
-    
+        print(f"[{time.time():.2f}] All remote clients closed.")
+
     def shutdown(self):
         """
         Shutdown the server and close all connections.
@@ -174,8 +182,8 @@ class PipelineServer(FastAPI):
         print(f"Anacostia Webservice {self.name} Shutdown...")
 
     def run(self):
-        # Launch the root pipeline
-        self.pipeline.launch_nodes()
-
-        # start the server
-        self.server.run()
+        try:
+            # start the server
+            self.server.run()
+        except KeyboardInterrupt:
+            pass

@@ -39,7 +39,4 @@ service = PipelineServer(
     remote_clients=[client1]
 )
 
-try:
-    service.run()
-except KeyboardInterrupt:
-    service.shutdown()
+service.run()

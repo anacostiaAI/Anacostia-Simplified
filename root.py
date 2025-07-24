@@ -32,7 +32,4 @@ service = PipelineServer(
     ssl_keyfile=ssl_keyfile
 )
 
-try:
-    service.run()
-except KeyboardInterrupt:
-    service.shutdown()
+service.run()
