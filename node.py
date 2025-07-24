@@ -42,11 +42,11 @@ class Connector(FastAPI):
         # this happens when the Connector is initialized when PipelineServer call node.setup_connector()
         if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
             # If no SSL certificates are provided, create a client without them
-            self.client = httpx.AsyncClient(timeout=httpx.Timeout(1.0))
+            self.client = httpx.AsyncClient(headers={"Connection": "close"})
         else:
             # If SSL certificates are provided, use them to create the client
             try:
-                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), timeout=httpx.Timeout(1.0))
+                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), headers={"Connection": "close"})
             except httpx.ConnectError as e:
                 raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
 
@@ -170,8 +170,6 @@ class BaseNode(Thread):
 
         self.wait_for_connection = wait_for_connection
 
-        self.loop: asyncio.AbstractEventLoop = None
-
         self.predecessors = list() if predecessors is None else predecessors
         self.remote_predecessors = list() if remote_predecessors is None else remote_predecessors
         self.predecessors_events: Dict[str, Event] = {predecessor.name: Event() for predecessor in self.predecessors}
@@ -204,12 +202,6 @@ class BaseNode(Thread):
         if url not in self.remote_predecessors:
             self.remote_predecessors.append(url)
             self.predecessors_events[url] = Event()
-
-    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        """
-        Set the event loop for the connector. This is done to ensure the connector uses the same event loop as the server.
-        """
-        self.loop = loop
 
     def setup_connector(
         self, host: str = None, port: int = None, 

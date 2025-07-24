@@ -140,12 +140,12 @@ class BaseClient(FastAPI):
     def create_client(self):
         if self.ssl_ca_certs is None or self.ssl_certfile is None or self.ssl_keyfile is None:
             # If no SSL certificates are provided, create a client without them
-            self.client = httpx.AsyncClient(base_url=self.server_url, timeout=httpx.Timeout(1.0))
+            self.client = httpx.AsyncClient(base_url=self.server_url, headers={"Connection": "close"})
         else:
             # If SSL certificates are provided, use them to create the client
             try:
                 self.client = httpx.AsyncClient(
-                    base_url=self.server_url, verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), timeout=httpx.Timeout(1.0)
+                    base_url=self.server_url, verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), headers={"Connection": "close"}
                 )
             except httpx.ConnectError as e:
                 raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")

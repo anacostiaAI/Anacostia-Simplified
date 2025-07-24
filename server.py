@@ -35,9 +35,7 @@ class PipelineServer(FastAPI):
         async def lifespan(app: PipelineServer):
             app.loop = asyncio.get_event_loop()     # Get the event loop of the FastAPI app
             
-            # Launch the root pipeline
-            app.pipeline.launch_nodes()
-
+            app.pipeline.launch_nodes()     # Launch the root pipeline
             await app.connect()     # Connect to the leaf services
 
             yield
@@ -126,7 +124,9 @@ class PipelineServer(FastAPI):
         else:
             # If SSL certificates are provided, use them to create the client
             try:
-                self.client = httpx.AsyncClient(verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), headers={"Connection": "close"})
+                self.client = httpx.AsyncClient(
+                    verify=self.ssl_ca_certs, cert=(self.ssl_certfile, self.ssl_keyfile), headers={"Connection": "close"}
+                )
             except httpx.ConnectError as e:
                 raise ValueError(f"Failed to create HTTP client with SSL certificates: {e}")
 
@@ -137,9 +137,6 @@ class PipelineServer(FastAPI):
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
-        for node in self.pipeline.nodes:
-            node.set_event_loop(self.loop)
-        
         for node_server in self.node_servers:
             node_server.set_event_loop(self.loop)
             await node_server.connect()
@@ -168,22 +165,8 @@ class PipelineServer(FastAPI):
             await connector.client.aclose()
         print(f"[{time.time():.2f}] All remote clients closed.")
 
-    def shutdown(self):
-        """
-        Shutdown the server and close all connections.
-        """
-
-        print("Killing pipeline...")
-        self.pipeline.terminate_nodes()
-        print("Pipeline Killed.")
-
-        print(f"Shutting down {self.name} Webservice...")
-        self.server.should_exit = True
-        print(f"Anacostia Webservice {self.name} Shutdown...")
-
     def run(self):
         try:
-            # start the server
-            self.server.run()
-        except KeyboardInterrupt:
+            self.server.run()       # start the server
+        except (KeyboardInterrupt, SystemExit):
             pass
