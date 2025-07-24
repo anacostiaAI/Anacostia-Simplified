@@ -137,6 +137,12 @@ class PipelineServer(FastAPI):
             task.append(self.client.post(f"{successor_url}/connect", json=pipeline_server_model))
         await asyncio.gather(*task)
 
+        # we set the event loop for each node server and connector because the node servers and connectors are initialized in the constructor of the PipelineServer
+        # when the setup_server and setup_connector methods are called
+        # thus, we need to ensure they use the same event loop as the server otherwise we will get an error when using the client in the node servers and connectors
+        # e.g. when using the client in the action method of a node, we will
+        # get an error like:
+        # "RuntimeError: client is bound to a different event loop."
         for node_server in self.node_servers:
             node_server.set_event_loop(self.loop)
             await node_server.connect()
